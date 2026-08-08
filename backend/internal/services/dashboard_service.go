@@ -142,7 +142,7 @@ func (s *dashboardService) GetStats() (*DashboardStats, error) {
 	stats.ActiveSessions = sessions
 
 	iaTotal, iaEnabled, iaDisabled, iaOnline, iaOffline, iaArchived, err :=
-		s.internetAccountRepo.CountStats()
+		s.internetAccountRepo.CountStats(nil, false)
 	if err == nil {
 		stats.TotalAccounts = iaTotal
 		stats.EnabledAccounts = iaEnabled
