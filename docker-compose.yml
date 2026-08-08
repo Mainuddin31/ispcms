@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ispcms_db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-ispcms}
+      POSTGRES_USER: ${DB_USER:-ispcms}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-ispcms}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ispcms_net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: ispcms_backend
+    env_file: .env
+    environment:
+      DB_HOST: 127.0.0.1   # postgres is exposed on host port 5432
+      SERVER_PORT: 8082     # 8080 is taken by another service on this host
+    # network_mode: host gives the backend direct access to the host network stack
+    # so it can reach OLT devices (172.x.x.x) via the server's physical interfaces.
+    network_mode: host
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: ispcms_frontend
+    environment:
+      NEXT_PUBLIC_API_URL: /api/v1
+      API_PROXY_TARGET: http://127.0.0.1:8082
+    ports:
+      - "5869:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - ispcms_net
+
+networks:
+  ispcms_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.0.0/24
+
+volumes:
+  postgres_data:

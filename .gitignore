@@ -1,0 +1,27 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Go
+backend/vendor/
+backend/*.exe
+backend/*.out
+backend/tmp/
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+
+# Docker volumes & build artifacts
+*.log
+*.pid
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
