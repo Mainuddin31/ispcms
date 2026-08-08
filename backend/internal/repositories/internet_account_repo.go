@@ -10,12 +10,16 @@ import (
 )
 
 type InternetAccountFilter struct {
-	RouterID *uuid.UUID
-	Profile  string
-	Search   string
-	IsOnline *bool
-	Disabled *bool
-	Archived *bool
+	RouterID        *uuid.UUID
+	Profile         string
+	Search          string
+	IsOnline        *bool
+	Disabled        *bool
+	Archived        *bool
+	// Prefixes restricts results to accounts whose username starts with one of
+	// these values. nil = unrestricted (admin/super_admin). empty slice = no results.
+	Prefixes        []string
+	PrefixRestricted bool // true when prefixes came from a role (even if empty)
 }
 
 type InternetAccountRepository interface {
@@ -25,7 +29,7 @@ type InternetAccountRepository interface {
 	UpdateSessionInfo(routerID uuid.UUID, username string, currentIP, sessionID, uptime string, connectedSince *time.Time) error
 	List(filter InternetAccountFilter, page, pageSize int) ([]models.InternetAccount, int64, error)
 	GetByID(id uuid.UUID) (*models.InternetAccount, error)
-	CountStats() (total, enabled, disabled, online, offline, archived int64, err error)
+	CountStats(prefixes []string, prefixRestricted bool) (total, enabled, disabled, online, offline, archived int64, err error)
 	ListProfiles() ([]string, error)
 	// DeleteOrphaned removes rows whose router_id is the nil UUID or references a
 	// router that no longer exists in the routers table. Returns count deleted.
@@ -170,6 +174,21 @@ func (r *internetAccountRepository) List(filter InternetAccountFilter, page, pag
 		q = q.Where("username ILIKE ? OR comment ILIKE ? OR caller_id ILIKE ?", like, like, like)
 	}
 
+	// Prefix-based scoping: restricted users only see accounts whose username
+	// starts with one of their role's allowed prefixes.
+	if filter.PrefixRestricted {
+		if len(filter.Prefixes) == 0 {
+			// No prefixes configured → no accounts visible.
+			return []models.InternetAccount{}, 0, nil
+		}
+		// Build: username ILIKE 'p1%' OR username ILIKE 'p2%' …
+		sub := r.db.Where("username ILIKE ?", filter.Prefixes[0]+"%")
+		for _, p := range filter.Prefixes[1:] {
+			sub = sub.Or("username ILIKE ?", p+"%")
+		}
+		q = q.Where(sub)
+	}
+
 	q.Count(&total)
 	err := q.Order("username ASC").
 		Offset((page - 1) * pageSize).
@@ -184,13 +203,26 @@ func (r *internetAccountRepository) GetByID(id uuid.UUID) (*models.InternetAccou
 	return &a, err
 }
 
-func (r *internetAccountRepository) CountStats() (total, enabled, disabled, online, offline, archived int64, err error) {
-	r.db.Model(&models.InternetAccount{}).Where("archived_at IS NULL").Count(&total)
-	r.db.Model(&models.InternetAccount{}).Where("archived_at IS NULL AND disabled = ?", false).Count(&enabled)
-	r.db.Model(&models.InternetAccount{}).Where("archived_at IS NULL AND disabled = ?", true).Count(&disabled)
-	r.db.Model(&models.InternetAccount{}).Where("archived_at IS NULL AND is_online = ?", true).Count(&online)
-	r.db.Model(&models.InternetAccount{}).Where("archived_at IS NULL AND is_online = ?", false).Count(&offline)
-	r.db.Model(&models.InternetAccount{}).Where("archived_at IS NOT NULL").Count(&archived)
+func (r *internetAccountRepository) CountStats(prefixes []string, prefixRestricted bool) (total, enabled, disabled, online, offline, archived int64, err error) {
+	applyPrefix := func(q *gorm.DB) *gorm.DB {
+		if !prefixRestricted || len(prefixes) == 0 {
+			return q
+		}
+		sub := r.db.Where("username ILIKE ?", prefixes[0]+"%")
+		for _, p := range prefixes[1:] {
+			sub = sub.Or("username ILIKE ?", p+"%")
+		}
+		return q.Where(sub)
+	}
+	if prefixRestricted && len(prefixes) == 0 {
+		return 0, 0, 0, 0, 0, 0, nil
+	}
+	applyPrefix(r.db.Model(&models.InternetAccount{}).Where("archived_at IS NULL")).Count(&total)
+	applyPrefix(r.db.Model(&models.InternetAccount{}).Where("archived_at IS NULL AND disabled = ?", false)).Count(&enabled)
+	applyPrefix(r.db.Model(&models.InternetAccount{}).Where("archived_at IS NULL AND disabled = ?", true)).Count(&disabled)
+	applyPrefix(r.db.Model(&models.InternetAccount{}).Where("archived_at IS NULL AND is_online = ?", true)).Count(&online)
+	applyPrefix(r.db.Model(&models.InternetAccount{}).Where("archived_at IS NULL AND is_online = ?", false)).Count(&offline)
+	applyPrefix(r.db.Model(&models.InternetAccount{}).Where("archived_at IS NOT NULL")).Count(&archived)
 	return
 }
 

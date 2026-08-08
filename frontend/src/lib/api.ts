@@ -90,6 +90,8 @@ export const rolesApi = {
   permissions: () => api.get("/roles/permissions"),
   setPermissions: (roleId: string, permission_ids: string[]) =>
     api.put(`/roles/${roleId}/permissions`, { permission_ids }),
+  setAccountPrefixes: (roleId: string, prefixes: string[]) =>
+    api.put(`/roles/${roleId}/account-prefixes`, { prefixes }),
 };
 
 // ─── Routers ──────────────────────────────────────────────────────────────────

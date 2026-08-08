@@ -23,6 +23,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import { RoleFormDialog } from "@/components/roles/RoleFormDialog";
 import { PermissionMatrix } from "@/components/roles/PermissionMatrix";
+import { AccountPrefixEditor } from "@/components/roles/AccountPrefixEditor";
 
 export default function RolesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -145,6 +146,11 @@ export default function RolesPage() {
                       role={role}
                       allPermissions={allPermissions}
                     />
+                    {!["super_admin", "admin"].includes(role.name) && (
+                      <div className="mt-5 pt-4 border-t">
+                        <AccountPrefixEditor role={role} />
+                      </div>
+                    )}
                   </CardContent>
                 )}
               </Card>

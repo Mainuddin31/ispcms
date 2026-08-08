@@ -18,6 +18,7 @@ type RoleService interface {
 	AssignPermission(roleID, permID uuid.UUID) error
 	RemovePermission(roleID, permID uuid.UUID) error
 	SetPermissions(roleID uuid.UUID, permIDs []uuid.UUID) error
+	SetAccountPrefixes(roleID uuid.UUID, prefixes []string) error
 }
 
 type CreateRoleRequest struct {
@@ -93,6 +94,13 @@ func (s *roleService) AssignPermission(roleID, permID uuid.UUID) error {
 
 func (s *roleService) RemovePermission(roleID, permID uuid.UUID) error {
 	return s.roleRepo.RemovePermission(roleID, permID)
+}
+
+func (s *roleService) SetAccountPrefixes(roleID uuid.UUID, prefixes []string) error {
+	if _, err := s.roleRepo.FindByID(roleID); err != nil {
+		return errors.New("role not found")
+	}
+	return s.roleRepo.UpdateAccountPrefixes(roleID, prefixes)
 }
 
 func (s *roleService) SetPermissions(roleID uuid.UUID, permIDs []uuid.UUID) error {

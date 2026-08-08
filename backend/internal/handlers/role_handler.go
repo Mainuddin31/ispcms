@@ -133,3 +133,24 @@ func (h *RoleHandler) SetPermissions(c *fiber.Ctx) error {
 	}
 	return utils.OKMessage(c, "permissions updated", nil)
 }
+
+// SetAccountPrefixes handles PUT /api/v1/roles/:id/account-prefixes
+func (h *RoleHandler) SetAccountPrefixes(c *fiber.Ctx) error {
+	roleID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return utils.BadRequest(c, "invalid role id")
+	}
+	var body struct {
+		Prefixes []string `json:"prefixes"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return utils.BadRequest(c, "invalid request body")
+	}
+	if body.Prefixes == nil {
+		body.Prefixes = []string{}
+	}
+	if err := h.roleSvc.SetAccountPrefixes(roleID, body.Prefixes); err != nil {
+		return utils.BadRequest(c, err.Error())
+	}
+	return utils.OKMessage(c, "account prefixes updated", nil)
+}

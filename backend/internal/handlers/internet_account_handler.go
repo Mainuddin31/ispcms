@@ -5,20 +5,23 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/ispcms/backend/internal/middleware"
 	"github.com/ispcms/backend/internal/repositories"
 	"github.com/ispcms/backend/internal/services"
 )
 
 type InternetAccountHandler struct {
-	repo    repositories.InternetAccountRepository
-	syncSvc services.SyncService
+	repo     repositories.InternetAccountRepository
+	roleRepo repositories.RoleRepository
+	syncSvc  services.SyncService
 }
 
 func NewInternetAccountHandler(
 	repo repositories.InternetAccountRepository,
+	roleRepo repositories.RoleRepository,
 	syncSvc services.SyncService,
 ) *InternetAccountHandler {
-	return &InternetAccountHandler{repo: repo, syncSvc: syncSvc}
+	return &InternetAccountHandler{repo: repo, roleRepo: roleRepo, syncSvc: syncSvc}
 }
 
 // List handles GET /api/v1/internet-accounts
@@ -59,6 +62,15 @@ func (h *InternetAccountHandler) List(c *fiber.Ctx) error {
 		filter.Archived = &b
 	}
 
+	// Apply account-prefix scoping based on the caller's role(s).
+	if userID, ok := middleware.GetCurrentUserID(c); ok {
+		prefixes, isSuperAdmin, _ := h.roleRepo.GetUserAccountPrefixes(userID)
+		if !isSuperAdmin {
+			filter.PrefixRestricted = true
+			filter.Prefixes = prefixes
+		}
+	}
+
 	accounts, total, err := h.repo.List(filter, page, pageSize)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
@@ -94,7 +106,16 @@ func (h *InternetAccountHandler) Get(c *fiber.Ctx) error {
 
 // Stats handles GET /api/v1/internet-accounts/stats
 func (h *InternetAccountHandler) Stats(c *fiber.Ctx) error {
-	total, enabled, disabled, online, offline, archived, err := h.repo.CountStats()
+	var prefixes []string
+	prefixRestricted := false
+	if userID, ok := middleware.GetCurrentUserID(c); ok {
+		p, isSuperAdmin, _ := h.roleRepo.GetUserAccountPrefixes(userID)
+		if !isSuperAdmin {
+			prefixRestricted = true
+			prefixes = p
+		}
+	}
+	total, enabled, disabled, online, offline, archived, err := h.repo.CountStats(prefixes, prefixRestricted)
 	if err != nil {
 		return fiber.NewError(fiber.StatusInternalServerError, err.Error())
 	}

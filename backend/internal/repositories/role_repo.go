@@ -17,6 +17,10 @@ type RoleRepository interface {
 	AssignPermission(roleID, permID uuid.UUID) error
 	RemovePermission(roleID, permID uuid.UUID) error
 	GetUserPermissions(userID uuid.UUID) ([]models.Permission, error)
+	// GetUserAccountPrefixes returns the merged account_prefixes from all roles
+	// the user has. Super-admin returns nil (meaning unrestricted).
+	GetUserAccountPrefixes(userID uuid.UUID) ([]string, bool, error)
+	UpdateAccountPrefixes(roleID uuid.UUID, prefixes []string) error
 }
 
 type roleRepository struct{ db *gorm.DB }
@@ -62,4 +66,39 @@ func (r *roleRepository) GetUserPermissions(userID uuid.UUID) ([]models.Permissi
 		JOIN user_roles ur ON ur.role_id = rp.role_id
 		WHERE ur.user_id = ?`, userID).Scan(&perms).Error
 	return perms, err
+}
+
+// GetUserAccountPrefixes collects account_prefixes from all roles the user belongs to.
+// Returns (prefixes, isSuperAdmin, error). If isSuperAdmin is true, caller should skip
+// prefix filtering entirely. Returns an empty slice (not nil) when no prefixes are set.
+func (r *roleRepository) GetUserAccountPrefixes(userID uuid.UUID) ([]string, bool, error) {
+	var roles []models.Role
+	err := r.db.Raw(`
+		SELECT ro.* FROM roles ro
+		JOIN user_roles ur ON ur.role_id = ro.id
+		WHERE ur.user_id = ? AND ro.deleted_at IS NULL`, userID).Scan(&roles).Error
+	if err != nil {
+		return nil, false, err
+	}
+	merged := []string{}
+	for _, role := range roles {
+		if role.Name == "super_admin" || role.Name == "admin" {
+			return nil, true, nil // unrestricted
+		}
+		for _, p := range role.AccountPrefixes {
+			if p != "" {
+				merged = append(merged, p)
+			}
+		}
+	}
+	return merged, false, nil
+}
+
+func (r *roleRepository) UpdateAccountPrefixes(roleID uuid.UUID, prefixes []string) error {
+	sp := models.StringSlice(prefixes)
+	v, err := sp.Value()
+	if err != nil {
+		return err
+	}
+	return r.db.Exec(`UPDATE roles SET account_prefixes = ?, updated_at = NOW() WHERE id = ?`, v, roleID).Error
 }

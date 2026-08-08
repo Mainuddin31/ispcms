@@ -17,6 +17,7 @@ export interface Role {
   name: string;
   display_name: string;
   description?: string;
+  account_prefixes?: string[];
   permissions?: Permission[];
   created_at: string;
   updated_at: string;
