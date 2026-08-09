@@ -162,6 +162,10 @@ type BillingService interface {
 	ListSubscriptions(page, pageSize int, accountID *uuid.UUID, packageID *uuid.UUID, activeOnly bool) ([]models.CustomerSubscription, int64, error)
 	CheckMonthlyBillingStatus(month, year int) (generated, pending int64, err error)
 	ListGenerationLogs(month, year, limit int) ([]models.BillGenerationLog, error)
+	// GetAccountDue returns total outstanding and list of unpaid bills for a customer.
+	GetAccountDue(internetAccountID uuid.UUID) (*AccountDueResult, error)
+	// CollectPayment applies amount across unpaid bills oldest-first.
+	CollectPayment(req CollectPaymentRequest) ([]models.MonthlyBill, error)
 }
 
 type billingService struct {
@@ -368,6 +372,105 @@ func (s *billingService) UpdateBillStatus(id uuid.UUID, status string, paidAmoun
 		}
 	}
 	return bill, nil
+}
+
+// ── Account Due / Collect Payment ─────────────────────────────────────────────
+
+// AccountDueResult is returned by GetAccountDue.
+type AccountDueResult struct {
+	TotalDue float64              `json:"total_due"`
+	Bills    []models.MonthlyBill `json:"bills"`
+}
+
+// CollectPaymentRequest is the payload for bulk payment collection.
+type CollectPaymentRequest struct {
+	InternetAccountID uuid.UUID  `json:"internet_account_id"`
+	Amount            float64    `json:"amount"`
+	PaymentMethod     string     `json:"payment_method"`
+	Notes             string     `json:"notes"`
+	ReceiptNumber     string     `json:"receipt_number"`
+	ReceivedByID      *uuid.UUID `json:"received_by_id"`
+}
+
+func (s *billingService) GetAccountDue(internetAccountID uuid.UUID) (*AccountDueResult, error) {
+	bills, err := s.billRepo.FindUnpaidByAccount(internetAccountID)
+	if err != nil {
+		return nil, err
+	}
+	var total float64
+	for _, b := range bills {
+		total += b.DueAmount
+	}
+	return &AccountDueResult{TotalDue: total, Bills: bills}, nil
+}
+
+// CollectPayment distributes the given amount across unpaid bills oldest-first.
+// Each bill is marked paid/partial as money is applied. Leftover (overpayment) is ignored.
+func (s *billingService) CollectPayment(req CollectPaymentRequest) ([]models.MonthlyBill, error) {
+	bills, err := s.billRepo.FindUnpaidByAccount(req.InternetAccountID)
+	if err != nil {
+		return nil, err
+	}
+	if len(bills) == 0 {
+		return nil, errors.New("no outstanding bills for this account")
+	}
+
+	method := req.PaymentMethod
+	if method == "" {
+		method = "cash"
+	}
+
+	remaining := req.Amount
+	updated := make([]models.MonthlyBill, 0, len(bills))
+
+	for i := range bills {
+		if remaining <= 0 {
+			break
+		}
+		b := &bills[i]
+		due := b.DueAmount
+		var apply float64
+		if remaining >= due {
+			apply = due
+			remaining -= due
+		} else {
+			apply = remaining
+			remaining = 0
+		}
+
+		b.PaidAmount += apply
+		b.DueAmount = b.TotalAmount - b.PaidAmount
+		if b.DueAmount <= 0 {
+			b.DueAmount = 0
+			b.Status = "paid"
+		} else {
+			b.Status = "partial"
+		}
+
+		if err := s.billRepo.Update(b); err != nil {
+			return nil, fmt.Errorf("updating bill %s: %w", b.BillNumber, err)
+		}
+
+		rec := &models.PaymentRecord{
+			BillID:            b.ID,
+			InternetAccountID: b.InternetAccountID,
+			Amount:            apply,
+			Notes:             req.Notes,
+			PaymentMethod:     method,
+			ReceiptNumber:     req.ReceiptNumber,
+			ReceivedByID:      req.ReceivedByID,
+		}
+		_ = s.paymentRepo.Create(rec)
+
+		if s.activitySvc != nil {
+			desc := fmt.Sprintf("Bill: %s | Amount: %.2f | Method: %s", b.BillNumber, apply, method)
+			s.activitySvc.Log(req.ReceivedByID, "billing", "payment_received", "Payment Received", desc, "payment", rec.ID.String())
+		}
+
+		updated = append(updated, *b)
+	}
+
+	return updated, nil
 }
 
 func (s *billingService) GetPaymentHistory(internetAccountID uuid.UUID) ([]models.PaymentRecord, error) {

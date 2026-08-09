@@ -5,6 +5,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/ispcms/backend/internal/middleware"
 	"github.com/ispcms/backend/internal/repositories"
 	"github.com/ispcms/backend/internal/services"
 )
@@ -112,9 +113,9 @@ func (h *BillHandler) UpdateStatus(c *fiber.Ctx) error {
 	if err := c.BodyParser(&body); err != nil {
 		return c.Status(400).JSON(fiber.Map{"success": false, "error": "invalid body"})
 	}
-	// Capture who received the payment.
+	// Capture who received the payment from JWT claims.
 	var receivedByID *uuid.UUID
-	if userID, ok := c.Locals("userID").(uuid.UUID); ok {
+	if userID, ok := middleware.GetCurrentUserID(c); ok {
 		receivedByID = &userID
 	}
 	bill, err := h.svc.UpdateBillStatus(id, body.Status, body.PaidAmount, body.Notes, body.PaymentMethod, body.ReceiptNumber, receivedByID)
@@ -175,6 +176,60 @@ func (h *BillHandler) BillingStatus(c *fiber.Ctx) error {
 			"bills_generated": generated, "bills_pending": pending,
 		},
 	})
+}
+
+// ── Account Due / Collect Payment ─────────────────────────────────────────────
+
+// GetAccountDue returns total outstanding and list of unpaid bills for a customer.
+// GET /api/v1/bills/account-due?internet_account_id=<uuid>
+func (h *BillHandler) GetAccountDue(c *fiber.Ctx) error {
+	accountID, err := uuid.Parse(c.Query("internet_account_id"))
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"success": false, "error": "invalid internet_account_id"})
+	}
+	result, err := h.svc.GetAccountDue(accountID)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"success": false, "error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"success": true, "data": result})
+}
+
+// CollectPayment applies a lump-sum payment across all unpaid bills oldest-first.
+// POST /api/v1/bills/collect
+func (h *BillHandler) CollectPayment(c *fiber.Ctx) error {
+	var body struct {
+		InternetAccountID string  `json:"internet_account_id"`
+		Amount            float64 `json:"amount"`
+		PaymentMethod     string  `json:"payment_method"`
+		Notes             string  `json:"notes"`
+		ReceiptNumber     string  `json:"receipt_number"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(400).JSON(fiber.Map{"success": false, "error": "invalid body"})
+	}
+	accountID, err := uuid.Parse(body.InternetAccountID)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"success": false, "error": "invalid internet_account_id"})
+	}
+	if body.Amount <= 0 {
+		return c.Status(400).JSON(fiber.Map{"success": false, "error": "amount must be greater than 0"})
+	}
+	var receivedByID *uuid.UUID
+	if userID, ok := middleware.GetCurrentUserID(c); ok {
+		receivedByID = &userID
+	}
+	bills, err := h.svc.CollectPayment(services.CollectPaymentRequest{
+		InternetAccountID: accountID,
+		Amount:            body.Amount,
+		PaymentMethod:     body.PaymentMethod,
+		Notes:             body.Notes,
+		ReceiptNumber:     body.ReceiptNumber,
+		ReceivedByID:      receivedByID,
+	})
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"success": false, "error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"success": true, "data": bills, "total": len(bills)})
 }
 
 // ── Subscriptions ─────────────────────────────────────────────────────────────

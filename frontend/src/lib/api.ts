@@ -185,6 +185,15 @@ export const billsApi = {
     api.get("/bills/status", { params: { month, year } }),
   generationLogs: (params?: { month?: number; year?: number; limit?: number }) =>
     api.get("/bills/generation-logs", { params }),
+  accountDue: (internetAccountId: string) =>
+    api.get("/bills/account-due", { params: { internet_account_id: internetAccountId } }),
+  collect: (data: {
+    internet_account_id: string;
+    amount: number;
+    payment_method?: string;
+    notes?: string;
+    receipt_number?: string;
+  }) => api.post("/bills/collect", data),
 };
 
 // ─── Payment History ──────────────────────────────────────────────────────────

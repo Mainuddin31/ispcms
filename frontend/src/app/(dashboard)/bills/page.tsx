@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, Loader2, Search, Zap, ChevronLeft, ChevronRight, History } from "lucide-react";
+import {
+  FileText, Loader2, Search, Zap, ChevronLeft, ChevronRight,
+  History, Wallet, ArrowDownUp,
+} from "lucide-react";
 import { billsApi, paymentHistoryApi } from "@/lib/api";
 import { MonthlyBill, PaginatedResponse, PaymentRecord } from "@/types";
 import { Topbar } from "@/components/layout/Topbar";
@@ -40,6 +43,23 @@ const MONTHS = [
   "July","August","September","October","November","December",
 ];
 
+interface AccountDueBill {
+  id: string;
+  bill_number: string;
+  billing_month: number;
+  billing_year: number;
+  total_amount: number;
+  paid_amount: number;
+  due_amount: number;
+  status: string;
+  package?: { display_name: string };
+}
+
+interface AccountDueResult {
+  total_due: number;
+  bills: AccountDueBill[];
+}
+
 export default function BillsPage() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -56,16 +76,16 @@ export default function BillsPage() {
   const [confirmGenerateOpen, setConfirmGenerateOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
 
-  // Record Payment dialog
-  const [payDialogOpen, setPayDialogOpen] = useState(false);
-  const [selectedBill, setSelectedBill] = useState<MonthlyBill | null>(null);
-  const [paidAmount, setPaidAmount] = useState("");
-  const [payNotes, setPayNotes] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("cash");
-  const [receiptNumber, setReceiptNumber] = useState("");
-  const [paying, setPaying] = useState(false);
+  // ── Collect Payment dialog (bulk, carry-forward) ──
+  const [collectDialogOpen, setCollectDialogOpen] = useState(false);
+  const [collectAccount, setCollectAccount] = useState<{ id: string; username: string } | null>(null);
+  const [collectAmount, setCollectAmount] = useState("");
+  const [collectMethod, setCollectMethod] = useState("cash");
+  const [collectReceipt, setCollectReceipt] = useState("");
+  const [collectNotes, setCollectNotes] = useState("");
+  const [collecting, setCollecting] = useState(false);
 
-  // Payment history dialog
+  // ── Payment history dialog ──
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [historyAccount, setHistoryAccount] = useState<{ id: string; username: string } | null>(null);
 
@@ -79,6 +99,14 @@ export default function BillsPage() {
         month: monthFilter ? parseInt(monthFilter) : undefined,
         year: yearFilter ? parseInt(yearFilter) : undefined,
       }).then((r) => r.data as PaginatedResponse<MonthlyBill> & { data: MonthlyBill[] }),
+  });
+
+  // Fetch total outstanding when collect dialog opens
+  const { data: accountDueData, isLoading: dueLoading } = useQuery({
+    queryKey: ["account-due", collectAccount?.id],
+    queryFn: () =>
+      billsApi.accountDue(collectAccount!.id).then((r) => r.data.data as AccountDueResult),
+    enabled: !!collectAccount && collectDialogOpen,
   });
 
   const { data: historyData, isLoading: historyLoading } = useQuery({
@@ -109,13 +137,14 @@ export default function BillsPage() {
     }
   }
 
-  function openPayDialog(bill: MonthlyBill) {
-    setSelectedBill(bill);
-    setPaidAmount(String(bill.due_amount));
-    setPayNotes("");
-    setPaymentMethod("cash");
-    setReceiptNumber("");
-    setPayDialogOpen(true);
+  function openCollectDialog(bill: MonthlyBill) {
+    if (!bill.internet_account) return;
+    setCollectAccount({ id: bill.internet_account_id, username: bill.internet_account.username });
+    setCollectAmount("");   // will be set once accountDueData loads
+    setCollectMethod("cash");
+    setCollectReceipt("");
+    setCollectNotes("");
+    setCollectDialogOpen(true);
   }
 
   function openHistory(bill: MonthlyBill) {
@@ -124,24 +153,36 @@ export default function BillsPage() {
     setHistoryDialogOpen(true);
   }
 
-  async function handlePayment() {
-    if (!selectedBill) return;
-    setPaying(true);
+  async function handleCollect() {
+    if (!collectAccount) return;
+    const amount = parseFloat(collectAmount);
+    if (!amount || amount <= 0) {
+      toast({ title: "Enter a valid amount", variant: "destructive" });
+      return;
+    }
+    setCollecting(true);
     try {
-      await billsApi.updateStatus(selectedBill.id, {
-        paid_amount: selectedBill.paid_amount + parseFloat(paidAmount),
-        notes: payNotes,
-        payment_method: paymentMethod,
-        receipt_number: receiptNumber,
+      const res = await billsApi.collect({
+        internet_account_id: collectAccount.id,
+        amount,
+        payment_method: collectMethod,
+        notes: collectNotes,
+        receipt_number: collectReceipt,
       });
-      toast({ title: "Payment recorded" });
+      const updatedBills: MonthlyBill[] = res.data.data;
+      const cleared = updatedBills.filter((b) => b.status === "paid").length;
+      toast({
+        title: "Payment Collected",
+        description: `৳${amount.toFixed(0)} applied. ${cleared} bill(s) fully cleared.`,
+      });
       qc.invalidateQueries({ queryKey: ["bills"] });
-      setPayDialogOpen(false);
+      qc.invalidateQueries({ queryKey: ["account-due"] });
+      setCollectDialogOpen(false);
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? "Update failed";
+      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? "Collection failed";
       toast({ title: "Error", description: msg, variant: "destructive" });
     } finally {
-      setPaying(false);
+      setCollecting(false);
     }
   }
 
@@ -149,6 +190,8 @@ export default function BillsPage() {
   const totalPages = data?.total_pages ?? 1;
   const years = [String(currentYear), String(currentYear - 1), String(currentYear - 2)];
   const history = historyData ?? [];
+  const dueBills = accountDueData?.bills ?? [];
+  const totalDue = accountDueData?.total_due ?? 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -212,7 +255,7 @@ export default function BillsPage() {
                 <TableHead className="text-right">Due</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Due Date</TableHead>
-                <TableHead className="w-44">Actions</TableHead>
+                <TableHead className="w-48">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -264,8 +307,10 @@ export default function BillsPage() {
                     <TableCell>
                       <div className="flex gap-1">
                         {b.status !== "paid" && b.status !== "cancelled" && (
-                          <Button size="sm" variant="outline" onClick={() => openPayDialog(b)}>
-                            Record Payment
+                          <Button size="sm" variant="outline" onClick={() => openCollectDialog(b)}
+                            className="text-green-700 border-green-300 hover:bg-green-50">
+                            <Wallet className="h-3.5 w-3.5 mr-1" />
+                            Collect
                           </Button>
                         )}
                         <Button size="sm" variant="ghost" onClick={() => openHistory(b)} title="Payment history">
@@ -317,30 +362,82 @@ export default function BillsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Record Payment Dialog */}
-      <Dialog open={payDialogOpen} onOpenChange={setPayDialogOpen}>
-        <DialogContent>
+      {/* Collect Payment Dialog — shows ALL outstanding bills, applies oldest-first */}
+      <Dialog open={collectDialogOpen} onOpenChange={setCollectDialogOpen}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Record Payment</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Wallet className="h-5 w-5 text-green-600" />
+              Collect Payment — {collectAccount?.username}
+            </DialogTitle>
           </DialogHeader>
-          {selectedBill && (
+
+          {dueLoading ? (
+            <div className="space-y-2 py-4">
+              <Skeleton className="h-6 w-full" />
+              <Skeleton className="h-6 w-3/4" />
+              <Skeleton className="h-6 w-full" />
+            </div>
+          ) : (
             <div className="space-y-4">
-              <div className="rounded bg-muted p-3 text-sm space-y-1">
-                <p><span className="text-muted-foreground">Bill:</span> {selectedBill.bill_number}</p>
-                <p><span className="text-muted-foreground">Customer:</span> {selectedBill.internet_account?.username}</p>
-                <p><span className="text-muted-foreground">Total:</span> ৳{selectedBill.total_amount.toFixed(2)}</p>
-                <p><span className="text-muted-foreground">Already Paid:</span> ৳{selectedBill.paid_amount.toFixed(2)}</p>
-                <p><span className="text-muted-foreground">Due:</span> ৳{selectedBill.due_amount.toFixed(2)}</p>
+              {/* Outstanding bills breakdown */}
+              <div className="rounded-lg border overflow-hidden">
+                <div className="bg-muted px-3 py-2 flex items-center gap-2 text-sm font-medium">
+                  <ArrowDownUp className="h-4 w-4" />
+                  Outstanding Bills (oldest first)
+                </div>
+                {dueBills.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-4">No outstanding bills</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-xs text-muted-foreground">
+                        <th className="px-3 py-1.5 text-left font-medium">Period</th>
+                        <th className="px-3 py-1.5 text-right font-medium">Bill</th>
+                        <th className="px-3 py-1.5 text-right font-medium">Paid</th>
+                        <th className="px-3 py-1.5 text-right font-medium text-red-600">Due</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dueBills.map((b, idx) => (
+                        <tr key={b.id} className={idx % 2 === 0 ? "" : "bg-muted/30"}>
+                          <td className="px-3 py-1.5">{MONTHS[b.billing_month - 1]} {b.billing_year}</td>
+                          <td className="px-3 py-1.5 text-right font-mono">৳{b.total_amount.toFixed(0)}</td>
+                          <td className="px-3 py-1.5 text-right font-mono text-green-600">৳{b.paid_amount.toFixed(0)}</td>
+                          <td className="px-3 py-1.5 text-right font-mono text-red-600 font-semibold">৳{b.due_amount.toFixed(0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="border-t bg-muted/50">
+                      <tr>
+                        <td className="px-3 py-2 font-semibold text-sm" colSpan={3}>Total Outstanding</td>
+                        <td className="px-3 py-2 text-right font-mono font-bold text-red-600 text-base">
+                          ৳{totalDue.toFixed(0)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                )}
               </div>
+
+              {/* Amount input — pre-fill with total due when data arrives */}
               <div className="space-y-1">
-                <Label>Amount Received Now (৳)</Label>
-                <Input type="number" min="0" step="0.01" value={paidAmount}
-                  onChange={(e) => setPaidAmount(e.target.value)} />
+                <Label>Amount Collected (৳)</Label>
+                <Input
+                  type="number" min="0" step="1"
+                  placeholder={`৳${totalDue.toFixed(0)}`}
+                  value={collectAmount || (accountDueData && !collectAmount ? String(totalDue) : collectAmount)}
+                  onChange={(e) => setCollectAmount(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Payment applied to July first, then August, etc. Partial amounts allowed.
+                </p>
               </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label>Payment Method</Label>
-                  <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <Select value={collectMethod} onValueChange={setCollectMethod}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="cash">Cash</SelectItem>
@@ -353,22 +450,28 @@ export default function BillsPage() {
                 </div>
                 <div className="space-y-1">
                   <Label>Receipt Number</Label>
-                  <Input placeholder="Optional" value={receiptNumber}
-                    onChange={(e) => setReceiptNumber(e.target.value)} />
+                  <Input placeholder="Optional" value={collectReceipt}
+                    onChange={(e) => setCollectReceipt(e.target.value)} />
                 </div>
               </div>
+
               <div className="space-y-1">
                 <Label>Notes</Label>
-                <Input placeholder="Optional" value={payNotes}
-                  onChange={(e) => setPayNotes(e.target.value)} />
+                <Input placeholder="Optional" value={collectNotes}
+                  onChange={(e) => setCollectNotes(e.target.value)} />
               </div>
             </div>
           )}
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPayDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handlePayment} disabled={paying}>
-              {paying && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Save Payment
+            <Button variant="outline" onClick={() => setCollectDialogOpen(false)}>Cancel</Button>
+            <Button
+              onClick={handleCollect}
+              disabled={collecting || dueLoading || dueBills.length === 0}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              {collecting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Collect Payment
             </Button>
           </DialogFooter>
         </DialogContent>

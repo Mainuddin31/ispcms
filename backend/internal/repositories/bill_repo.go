@@ -32,6 +32,8 @@ type BillRepository interface {
 	// active subscriptions still have no bill for the given month.
 	SummarizeBilling(month, year int) (generated, pending int64, err error)
 	CountThisMonth() (int64, error)
+	// FindUnpaidByAccount returns all unpaid/partial bills for an account, oldest first.
+	FindUnpaidByAccount(internetAccountID uuid.UUID) ([]models.MonthlyBill, error)
 }
 
 type billRepository struct{ db *gorm.DB }
@@ -145,6 +147,16 @@ func (r *billRepository) SummarizeBilling(month, year int) (generated, pending i
 		)
 	`, month, year).Scan(&pending)
 	return
+}
+
+func (r *billRepository) FindUnpaidByAccount(internetAccountID uuid.UUID) ([]models.MonthlyBill, error) {
+	var bills []models.MonthlyBill
+	err := r.db.Model(&models.MonthlyBill{}).
+		Preload("Package").
+		Where("internet_account_id = ? AND status IN ('pending','due','partial')", internetAccountID).
+		Order("billing_year ASC, billing_month ASC").
+		Find(&bills).Error
+	return bills, err
 }
 
 func (r *billRepository) CountThisMonth() (int64, error) {
