@@ -57,9 +57,10 @@ type DashboardStats struct {
 	BillsPending        int64   `json:"bills_billing_pending"`
 
 	// Financial — expenses
-	TodayExpense   float64 `json:"today_expense"`
-	MonthlyExpense float64 `json:"monthly_expense"`
-	TotalExpense   float64 `json:"total_expense"`
+	TodayExpense      float64 `json:"today_expense"`
+	MonthlyExpense    float64 `json:"monthly_expense"`
+	LastMonthExpense  float64 `json:"last_month_expense"`
+	TotalExpense      float64 `json:"total_expense"`
 
 	// Derived
 	CashInHand float64 `json:"cash_in_hand"` // = TotalCollection - TotalExpense (never stored)
@@ -250,6 +251,7 @@ func (s *dashboardService) GetStats(prefixes []string, prefixRestricted bool) (*
 		todayEnd := todayStart.Add(24 * time.Hour)
 		stats.TodayExpense, _ = s.expenseRepo.Summary(&todayStart, &todayEnd, nil)
 		stats.MonthlyExpense, _ = s.expenseRepo.Summary(&monthStart, nil, nil)
+		stats.LastMonthExpense, _ = s.expenseRepo.Summary(&lastMonthStart, &lastMonthEnd, nil)
 		stats.TotalExpense, _ = s.expenseRepo.Summary(nil, nil, nil)
 		// Expense category breakdown for pie chart (this month)
 		stats.ExpenseCategoryPie, _ = s.expenseRepo.CategoryTotals(&monthStart, nil)

@@ -184,8 +184,8 @@ export default function DashboardPage() {
           ) : (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard title="Today's Collection" value={fmt(stats?.today_collection ?? 0)} icon={ArrowDownCircle} color="bg-emerald-500" />
-              <StatCard title="This Month" value={fmt(stats?.monthly_collection ?? 0)} icon={TrendingUp} color="bg-green-600" sub={`Last month ${fmt(stats?.last_month_collection ?? 0)}`} />
-              <StatCard title="Total Collected" value={fmt(stats?.total_collection ?? 0)} icon={Banknote} color="bg-teal-600" />
+              <StatCard title="This Month" value={fmt(stats?.monthly_collection ?? 0)} icon={TrendingUp} color="bg-green-600" />
+              <StatCard title="Last Month" value={fmt(stats?.last_month_collection ?? 0)} icon={Banknote} color="bg-teal-600" />
               <StatCard title="Outstanding Due" value={fmt(stats?.total_outstanding_due ?? 0)} icon={AlertTriangle} color={(stats?.total_outstanding_due ?? 0) > 0 ? "bg-red-500" : "bg-slate-400"} />
             </div>
           )}
@@ -203,13 +203,13 @@ export default function DashboardPage() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard title="Today's Expense" value={fmt(stats?.today_expense ?? 0)} icon={ArrowUpCircle} color="bg-orange-500" />
               <StatCard title="This Month" value={fmt(stats?.monthly_expense ?? 0)} icon={Receipt} color="bg-amber-500" />
-              <StatCard title="Total Expense" value={fmt(stats?.total_expense ?? 0)} icon={Wallet} color="bg-red-500" />
+              <StatCard title="Last Month" value={fmt(stats?.last_month_expense ?? 0)} icon={Wallet} color="bg-red-400" />
               <StatCard
                 title="Cash in Hand"
-                value={fmt(stats?.cash_in_hand ?? 0)}
+                value={fmt((stats?.monthly_collection ?? 0) - (stats?.monthly_expense ?? 0))}
                 icon={ShieldCheck}
-                color={(stats?.cash_in_hand ?? 0) >= 0 ? "bg-indigo-600" : "bg-red-600"}
-                sub="Total collected − total expense"
+                color={((stats?.monthly_collection ?? 0) - (stats?.monthly_expense ?? 0)) >= 0 ? "bg-indigo-600" : "bg-red-600"}
+                sub="This month collection − expense"
               />
             </div>
           )}

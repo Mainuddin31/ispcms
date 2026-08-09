@@ -343,6 +343,7 @@ export interface DashboardStats {
   // Financial — expenses
   today_expense: number;
   monthly_expense: number;
+  last_month_expense: number;
   total_expense: number;
   // Derived
   cash_in_hand: number;
