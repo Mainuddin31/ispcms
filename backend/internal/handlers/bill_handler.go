@@ -10,10 +10,13 @@ import (
 	"github.com/ispcms/backend/internal/services"
 )
 
-type BillHandler struct{ svc services.BillingService }
+type BillHandler struct {
+	svc      services.BillingService
+	roleRepo repositories.RoleRepository
+}
 
-func NewBillHandler(svc services.BillingService) *BillHandler {
-	return &BillHandler{svc: svc}
+func NewBillHandler(svc services.BillingService, roleRepo repositories.RoleRepository) *BillHandler {
+	return &BillHandler{svc: svc, roleRepo: roleRepo}
 }
 
 func (h *BillHandler) List(c *fiber.Ctx) error {
@@ -36,6 +39,13 @@ func (h *BillHandler) List(c *fiber.Ctx) error {
 		uid, err := uuid.Parse(id)
 		if err == nil {
 			filter.PackageID = &uid
+		}
+	}
+	// Apply account-prefix scoping.
+	if userID, ok := middleware.GetCurrentUserID(c); ok {
+		if prefixes, isSuperAdmin, _ := h.roleRepo.GetUserAccountPrefixes(userID); !isSuperAdmin {
+			filter.PrefixRestricted = true
+			filter.Prefixes = prefixes
 		}
 	}
 

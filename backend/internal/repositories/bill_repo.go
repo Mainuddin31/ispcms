@@ -17,6 +17,9 @@ type BillFilter struct {
 	Month             int
 	Year              int
 	Search            string
+	// Prefix scoping — mirrors InternetAccountFilter
+	Prefixes         []string
+	PrefixRestricted bool
 }
 
 type BillRepository interface {
@@ -79,6 +82,20 @@ func (r *billRepository) List(filter BillFilter, page, pageSize int) ([]models.M
 	var total int64
 	q := r.db.Model(&models.MonthlyBill{}).
 		Preload("InternetAccount.Router").Preload("Package")
+
+	// Prefix scoping — restrict to accounts whose username matches allowed prefixes.
+	if filter.PrefixRestricted {
+		if len(filter.Prefixes) == 0 {
+			return []models.MonthlyBill{}, 0, nil
+		}
+		q = q.Joins("JOIN internet_accounts ia_pfx ON ia_pfx.id = monthly_bills.internet_account_id")
+		sub := r.db.Where("ia_pfx.username ILIKE ?", filter.Prefixes[0]+"%")
+		for _, p := range filter.Prefixes[1:] {
+			sub = sub.Or("ia_pfx.username ILIKE ?", p+"%")
+		}
+		q = q.Where(sub)
+	}
+
 	if filter.InternetAccountID != nil {
 		q = q.Where("internet_account_id = ?", filter.InternetAccountID)
 	}

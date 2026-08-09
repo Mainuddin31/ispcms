@@ -20,6 +20,9 @@ type CollectionReportFilter struct {
 	PONPortID     *uuid.UUID
 	CollectorID   *uuid.UUID
 	Search        string
+	// Prefix scoping
+	Prefixes         []string
+	PrefixRestricted bool
 }
 
 // CollectionRow is one row in the collection detail table.
@@ -105,6 +108,21 @@ func NewCollectionReportRepository(db *gorm.DB) CollectionReportRepository {
 func (r *collectionReportRepository) baseWhere(f CollectionReportFilter) (string, []interface{}) {
 	clauses := []string{"ia.archived_at IS NULL", "ia.disabled = false"}
 	args := []interface{}{}
+
+	// Prefix scoping — restrict to accounts matching allowed prefixes.
+	if f.PrefixRestricted {
+		if len(f.Prefixes) == 0 {
+			// No prefixes → return impossible condition so all queries return empty.
+			clauses = append(clauses, "1 = 0")
+		} else {
+			parts := make([]string, len(f.Prefixes))
+			for i, p := range f.Prefixes {
+				parts[i] = "ia.username ILIKE ?"
+				args = append(args, p+"%")
+			}
+			clauses = append(clauses, "("+strings.Join(parts, " OR ")+")")
+		}
+	}
 
 	// OLT / PON port filtering (via ONU link)
 	if f.OLTID != nil {
@@ -221,7 +239,7 @@ SELECT
     ),'')                                         AS collector_id,
     COALESCE(olt.name,'')                         AS olt_name,
     COALESCE(olt.id::text,'')                     AS olt_id,
-    COALESCE(pp.label,'')                         AS pon_port_label,
+    COALESCE(pp.port_name,'')                      AS pon_port_label,
     COALESCE(pp.id::text,'')                      AS pon_port_id,
     COALESCE(onu.onu_id,'')                       AS onu_id,
     COALESCE(onu.mac_address,'')                  AS onu_mac,

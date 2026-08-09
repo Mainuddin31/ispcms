@@ -5,16 +5,18 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/ispcms/backend/internal/middleware"
 	"github.com/ispcms/backend/internal/repositories"
 	"github.com/ispcms/backend/pkg/utils"
 )
 
 type ReportHandler struct {
 	reportRepo repositories.CollectionReportRepository
+	roleRepo   repositories.RoleRepository
 }
 
-func NewReportHandler(reportRepo repositories.CollectionReportRepository) *ReportHandler {
-	return &ReportHandler{reportRepo: reportRepo}
+func NewReportHandler(reportRepo repositories.CollectionReportRepository, roleRepo repositories.RoleRepository) *ReportHandler {
+	return &ReportHandler{reportRepo: reportRepo, roleRepo: roleRepo}
 }
 
 // ActiveUserCollection handles GET /api/v1/reports/active-user-collection
@@ -67,6 +69,14 @@ func (h *ReportHandler) ActiveUserCollection(c *fiber.Ctx) error {
 		uid, err := uuid.Parse(id)
 		if err == nil {
 			filter.CollectorID = &uid
+		}
+	}
+
+	// Apply account-prefix scoping based on the caller's role(s).
+	if userID, ok := middleware.GetCurrentUserID(c); ok {
+		if prefixes, isSuperAdmin, _ := h.roleRepo.GetUserAccountPrefixes(userID); !isSuperAdmin {
+			filter.PrefixRestricted = true
+			filter.Prefixes = prefixes
 		}
 	}
 
