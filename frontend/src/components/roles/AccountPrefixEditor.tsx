@@ -48,6 +48,7 @@ export function AccountPrefixEditor({ role }: Props) {
   };
 
   const isDirty =
+    input.trim() !== "" ||
     JSON.stringify(prefixes) !== JSON.stringify(role.account_prefixes ?? []);
 
   return (
@@ -84,7 +85,7 @@ export function AccountPrefixEditor({ role }: Props) {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKey}
-          placeholder={prefixes.length === 0 ? "Type prefix and press Enter…" : ""}
+          placeholder={prefixes.length === 0 ? "Type prefix, press Enter or click Save…" : "Add another…"}
           className="flex-1 min-w-[120px] bg-transparent outline-none text-xs placeholder:text-muted-foreground"
         />
       </div>
@@ -92,7 +93,13 @@ export function AccountPrefixEditor({ role }: Props) {
       <div className="flex items-center gap-2">
         <Button
           size="sm"
-          onClick={() => mutation.mutate(prefixes)}
+          onClick={() => {
+            // Auto-add any pending input before saving
+            const val = input.trim();
+            const final = val && !prefixes.includes(val) ? [...prefixes, val] : prefixes;
+            if (val) { setPrefixes(final); setInput(""); }
+            mutation.mutate(final);
+          }}
           disabled={!isDirty || mutation.isPending}
         >
           {mutation.isPending ? "Saving…" : "Save Prefixes"}
