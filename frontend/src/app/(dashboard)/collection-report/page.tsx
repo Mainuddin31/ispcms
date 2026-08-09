@@ -11,7 +11,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { reportsApi, routersApi, rolesApi } from "@/lib/api";
+import { reportsApi, routersApi } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { CollectionRow, CollectionReportData } from "@/types";
 import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -163,8 +164,14 @@ function Row({ label, value, mono }: { label: string; value: React.ReactNode; mo
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function CollectionReportPage() {
+  const { user, hasRole } = useAuth();
+  // Billing officers only see their own collections; admins see everyone's
+  const isBillingOfficer = !hasRole("super_admin") && !hasRole("admin");
+  const ownCollectorId = isBillingOfficer ? user?.id : undefined;
+
   const now = new Date();
-  const [billingMonth, setBillingMonth] = useState(now.getMonth() + 1);
+  // Default to current (running) month
+  const [billingMonth, setBillingMonth] = useState(now.getMonth() + 1); // getMonth() is 0-indexed
   const [billingYear, setBillingYear] = useState(now.getFullYear());
   const [paymentStatus, setPaymentStatus] = useState("all");
   const [search, setSearch] = useState("");
@@ -174,6 +181,9 @@ export default function CollectionReportPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [routerId, setRouterId] = useState("");
+  // Admin: click a staff card to filter table to that collector
+  const [selectedCollectorId, setSelectedCollectorId] = useState<string | null>(null);
+  const [selectedCollectorName, setSelectedCollectorName] = useState<string | null>(null);
 
   const params = {
     billing_month: billingMonth,
@@ -181,19 +191,22 @@ export default function CollectionReportPage() {
     payment_status: paymentStatus === "all" ? undefined : paymentStatus,
     search: search || undefined,
     router_id: routerId || undefined,
+    // Billing officers see only their own; admins filter by selected card (or all)
+    collector_id: ownCollectorId ?? selectedCollectorId ?? undefined,
     page,
     page_size: 50,
   };
 
-  const { data: raw, isLoading } = useQuery<{ data: { data: CollectionReportData } }>({
+  const { data: raw, isLoading, error } = useQuery<{ data: { data: CollectionReportData } }>({
     queryKey: ["collection-report", params],
     queryFn: () => reportsApi.activeUserCollection(params),
+    retry: false,
   });
 
   const { data: routersRaw } = useQuery<{ data: { data: any[] } }>({
     queryKey: ["routers-list"],
-    queryFn: rolesApi.list,
-    enabled: false, // loaded lazily when filters open
+    queryFn: () => routersApi.list(),
+    enabled: showFilters,
   });
 
   const report = raw?.data?.data;
@@ -219,9 +232,9 @@ export default function CollectionReportPage() {
   // Export as CSV
   function exportCSV() {
     if (!rows.length) return;
-    const headers = ["Customer","Username","Package","Bill Amount","Paid","Due","Status","Last Payment","Collected By"];
+    const headers = ["Username","Package","Bill Amount","Paid","Due","Status","Last Payment","Collected By"];
     const csvRows = rows.map(r => [
-      r.customer_name, r.username, r.package_name,
+      r.username, r.package_name,
       r.total_amount, r.paid_amount, r.due_amount,
       r.payment_status, r.last_payment_at ? fmtDate(r.last_payment_at) : "",
       r.collector_name,
@@ -301,6 +314,17 @@ export default function CollectionReportPage() {
           </Card>
         )}
 
+        {/* API error */}
+        {error && (
+          <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-800 p-4 text-sm text-red-700 dark:text-red-400">
+            <strong>Error loading report:</strong>{" "}
+            {(error as any)?.response?.data?.error ?? (error as any)?.message ?? "Unknown error"}
+            {(error as any)?.response?.status === 403 && (
+              <span className="block mt-1 text-xs">Your role does not have <code>reports.view</code> permission. Ask an admin to grant it.</span>
+            )}
+          </div>
+        )}
+
         {/* Summary cards */}
         {isLoading ? (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -320,36 +344,103 @@ export default function CollectionReportPage() {
           </div>
         )}
 
-        {/* Collector + Package summary + Daily chart */}
+        {/* ── Staff Collection Cards ─────────────────────────────────────── */}
         {!isLoading && report && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {/* By Collector */}
-            <Card>
-              <CardHeader className="py-3 px-4">
-                <CardTitle className="text-sm">By Collector</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <table className="w-full text-xs">
-                  <thead><tr className="border-b">
-                    <th className="text-left px-4 py-2 text-muted-foreground font-medium">Collector</th>
-                    <th className="text-right px-4 py-2 text-muted-foreground font-medium">Clients</th>
-                    <th className="text-right px-4 py-2 text-muted-foreground font-medium">Amount</th>
-                  </tr></thead>
-                  <tbody>
-                    {report.collector_summary.length === 0 ? (
-                      <tr><td colSpan={3} className="text-center py-4 text-muted-foreground">No data</td></tr>
-                    ) : report.collector_summary.map((c) => (
-                      <tr key={c.collector_id} className="border-b last:border-0">
-                        <td className="px-4 py-2 font-medium">{c.collector_name}</td>
-                        <td className="px-4 py-2 text-right">{c.client_count}</td>
-                        <td className="px-4 py-2 text-right text-green-600 font-medium">{fmt(c.collection)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </CardContent>
-            </Card>
+          <>
+            <div>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+                {isBillingOfficer ? `My Collection — ${periodLabel}` : `Staff Collection — ${periodLabel}`}
+              </p>
+              {!isBillingOfficer && (
+                <p className="text-xs text-muted-foreground mb-3">Click a card to see that staff member's collected bill list below.</p>
+              )}
+              {report.collector_summary.length === 0 ? (
+                <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">No collection recorded for this period.</CardContent></Card>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {report.collector_summary.map((c, idx) => {
+                    const totalCollection = report.summary?.collection_amount ?? 0;
+                    const share = totalCollection > 0 ? (c.collection / totalCollection) * 100 : 0;
+                    const colors = [
+                      "border-l-blue-500", "border-l-emerald-500", "border-l-violet-500",
+                      "border-l-amber-500", "border-l-rose-500", "border-l-cyan-500",
+                    ];
+                    const bar = [
+                      "bg-blue-500", "bg-emerald-500", "bg-violet-500",
+                      "bg-amber-500", "bg-rose-500", "bg-cyan-500",
+                    ];
+                    const color = colors[idx % colors.length];
+                    const barColor = bar[idx % bar.length];
+                    const isSelected = !isBillingOfficer && selectedCollectorId === c.collector_id;
+                    return (
+                      <Card
+                        key={c.collector_id}
+                        className={`border-l-4 ${color} transition-all ${
+                          !isBillingOfficer
+                            ? "cursor-pointer hover:shadow-md " + (isSelected ? "ring-2 ring-blue-500 shadow-md" : "")
+                            : ""
+                        }`}
+                        onClick={() => {
+                          if (isBillingOfficer) return;
+                          if (selectedCollectorId === c.collector_id) {
+                            setSelectedCollectorId(null);
+                            setSelectedCollectorName(null);
+                          } else {
+                            setSelectedCollectorId(c.collector_id);
+                            setSelectedCollectorName(c.collector_name);
+                            setPage(1);
+                          }
+                        }}
+                      >
+                        <CardContent className="p-5">
+                          {/* Avatar + name */}
+                          <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0">
+                              <span className="text-base font-bold text-muted-foreground">
+                                {c.collector_name.charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-sm truncate">{c.collector_name}</p>
+                              <p className="text-xs text-muted-foreground">Billing Officer</p>
+                            </div>
+                          </div>
 
+                          {/* Stats */}
+                          <div className="grid grid-cols-2 gap-3 mb-4">
+                            <div className="bg-muted/40 rounded-lg p-3">
+                              <p className="text-xs text-muted-foreground mb-0.5">Total Collection</p>
+                              <p className="text-lg font-bold text-green-600">{fmt(c.collection)}</p>
+                            </div>
+                            <div className="bg-muted/40 rounded-lg p-3">
+                              <p className="text-xs text-muted-foreground mb-0.5">Paid Clients</p>
+                              <p className="text-lg font-bold">{c.client_count}</p>
+                            </div>
+                          </div>
+
+                          {/* Share bar */}
+                          <div>
+                            <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                              <span>Share of total</span>
+                              <span className="font-medium">{share.toFixed(1)}%</span>
+                            </div>
+                            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${barColor} rounded-full transition-all duration-500`}
+                                style={{ width: `${Math.min(share, 100)}%` }}
+                              />
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+          {/* ── Package + Daily chart ──────────────────────────────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* By Package */}
             <Card>
               <CardHeader className="py-3 px-4">
@@ -399,6 +490,23 @@ export default function CollectionReportPage() {
               </CardContent>
             </Card>
           </div>
+          </>
+        )}
+
+        {/* Active collector filter banner */}
+        {!isBillingOfficer && selectedCollectorName && (
+          <div className="flex items-center gap-2 text-sm bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-4 py-2.5">
+            <Users className="w-4 h-4 text-blue-500 shrink-0" />
+            <span className="text-blue-700 dark:text-blue-300 font-medium">
+              Showing bills collected by <strong>{selectedCollectorName}</strong>
+            </span>
+            <button
+              onClick={() => { setSelectedCollectorId(null); setSelectedCollectorName(null); setPage(1); }}
+              className="ml-auto text-blue-500 hover:text-blue-700 text-xs font-medium"
+            >
+              ✕ Clear filter
+            </button>
+          </div>
         )}
 
         {/* Search bar */}
@@ -430,7 +538,7 @@ export default function CollectionReportPage() {
             <table className="w-full text-sm">
               <thead className="border-b">
                 <tr>
-                  {["Customer","Username","Package","Bill","Paid","Due","Status","Last Payment","Collected By"].map(h => (
+                  {["Username","Package","Bill","Paid","Due","Status","Last Payment","Collected By"].map(h => (
                     <th key={h} className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -439,20 +547,19 @@ export default function CollectionReportPage() {
                 {isLoading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="border-b">
-                      {Array.from({ length: 9 }).map((_, j) => (
+                      {Array.from({ length: 8 }).map((_, j) => (
                         <td key={j} className="px-4 py-2.5"><Skeleton className="h-4 w-16" /></td>
                       ))}
                     </tr>
                   ))
                 ) : rows.length === 0 ? (
-                  <tr><td colSpan={9} className="text-center py-10 text-muted-foreground">No records found</td></tr>
+                  <tr><td colSpan={8} className="text-center py-10 text-muted-foreground">No records found</td></tr>
                 ) : rows.map((row) => (
                   <tr
                     key={row.account_id}
                     className="border-b hover:bg-muted/50 cursor-pointer transition-colors"
                     onClick={() => openRow(row)}
                   >
-                    <td className="px-4 py-2.5 font-medium">{row.customer_name}</td>
                     <td className="px-4 py-2.5 font-mono text-xs">{row.username}</td>
                     <td className="px-4 py-2.5 text-muted-foreground">{row.package_name || "—"}</td>
                     <td className="px-4 py-2.5 tabular-nums">{row.total_amount ? fmt(row.total_amount) : "—"}</td>
@@ -460,7 +567,7 @@ export default function CollectionReportPage() {
                     <td className="px-4 py-2.5 tabular-nums text-red-500">{row.due_amount > 0 ? fmt(row.due_amount) : "—"}</td>
                     <td className="px-4 py-2.5">{statusBadge(row.payment_status)}</td>
                     <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">{fmtDate(row.last_payment_at)}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">{row.collector_name || "—"}</td>
+                    <td className="px-4 py-2.5 font-medium">{row.collector_name || <span className="text-muted-foreground">—</span>}</td>
                   </tr>
                 ))}
               </tbody>
