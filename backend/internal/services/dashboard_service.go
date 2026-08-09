@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ispcms/backend/internal/models"
@@ -72,7 +73,7 @@ type DashboardStats struct {
 }
 
 type DashboardService interface {
-	GetStats() (*DashboardStats, error)
+	GetStats(prefixes []string, prefixRestricted bool) (*DashboardStats, error)
 }
 
 type dashboardService struct {
@@ -116,9 +117,10 @@ func NewDashboardService(
 
 var monthNames = []string{"", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 
-func (s *dashboardService) GetStats() (*DashboardStats, error) {
+func (s *dashboardService) GetStats(prefixes []string, prefixRestricted bool) (*DashboardStats, error) {
 	stats := &DashboardStats{}
 
+	// Non-prefix-filtered stats (infrastructure / router / PPPoE)
 	total, online, offline, err := s.routerRepo.CountByStatus()
 	if err != nil {
 		return nil, err
@@ -141,8 +143,9 @@ func (s *dashboardService) GetStats() (*DashboardStats, error) {
 	}
 	stats.ActiveSessions = sessions
 
+	// Account counts — scoped to prefixes when prefix-restricted
 	iaTotal, iaEnabled, iaDisabled, iaOnline, iaOffline, iaArchived, err :=
-		s.internetAccountRepo.CountStats(nil, false)
+		s.internetAccountRepo.CountStats(prefixes, prefixRestricted)
 	if err == nil {
 		stats.TotalAccounts = iaTotal
 		stats.EnabledAccounts = iaEnabled
@@ -190,14 +193,57 @@ func (s *dashboardService) GetStats() (*DashboardStats, error) {
 	lastMonthEnd := monthStart.Add(-time.Nanosecond)
 
 	// ── Collection stats ──────────────────────────────────────────────────────
-	s.db.Raw(`SELECT COALESCE(SUM(amount), 0) FROM payment_records WHERE paid_at >= ?`, todayStart).Scan(&stats.TodayCollection)
-	s.db.Raw(`SELECT COALESCE(SUM(amount), 0) FROM payment_records WHERE paid_at >= ?`, monthStart).Scan(&stats.MonthlyCollection)
-	s.db.Raw(`SELECT COALESCE(SUM(amount), 0) FROM payment_records WHERE paid_at >= ? AND paid_at <= ?`, lastMonthStart, lastMonthEnd).Scan(&stats.LastMonthCollection)
-	s.db.Raw(`SELECT COALESCE(SUM(amount), 0) FROM payment_records`).Scan(&stats.TotalCollection)
-	s.db.Raw(`SELECT COALESCE(SUM(due_amount), 0) FROM monthly_bills WHERE status NOT IN ('paid', 'cancelled')`).Scan(&stats.TotalOutstandingDue)
-	s.db.Model(&models.MonthlyBill{}).Where("status != 'cancelled'").Count(&stats.TotalBillsGenerated)
-	s.db.Model(&models.MonthlyBill{}).Where("status = 'paid'").Count(&stats.BillsPaid)
-	s.db.Model(&models.MonthlyBill{}).Where("status IN ('pending', 'due', 'partial')").Count(&stats.BillsPending)
+	// Build optional prefix JOIN + WHERE clause for payment_records queries.
+	// payment_records.internet_account_id → internet_accounts.username
+	prJoin, prWhere, prArgs := s.buildPrefixFilter(prefixes, prefixRestricted, "payment_records", "pr_ia")
+	mbJoin, mbWhere, mbArgs := s.buildPrefixFilter(prefixes, prefixRestricted, "monthly_bills", "mb_ia")
+
+	s.db.Raw(
+		`SELECT COALESCE(SUM(amount), 0) FROM payment_records `+prJoin+` WHERE paid_at >= ? `+prWhere,
+		append([]interface{}{todayStart}, prArgs...)...,
+	).Scan(&stats.TodayCollection)
+	s.db.Raw(
+		`SELECT COALESCE(SUM(amount), 0) FROM payment_records `+prJoin+` WHERE paid_at >= ? `+prWhere,
+		append([]interface{}{monthStart}, prArgs...)...,
+	).Scan(&stats.MonthlyCollection)
+	s.db.Raw(
+		`SELECT COALESCE(SUM(amount), 0) FROM payment_records `+prJoin+` WHERE paid_at >= ? AND paid_at <= ? `+prWhere,
+		append([]interface{}{lastMonthStart, lastMonthEnd}, prArgs...)...,
+	).Scan(&stats.LastMonthCollection)
+	s.db.Raw(
+		`SELECT COALESCE(SUM(amount), 0) FROM payment_records `+prJoin+` WHERE 1=1 `+prWhere,
+		prArgs...,
+	).Scan(&stats.TotalCollection)
+	s.db.Raw(
+		`SELECT COALESCE(SUM(due_amount), 0) FROM monthly_bills `+mbJoin+` WHERE status NOT IN ('paid', 'cancelled') `+mbWhere,
+		mbArgs...,
+	).Scan(&stats.TotalOutstandingDue)
+
+	// Bill counts — scope to prefix accounts when restricted
+	billQ := s.db.Model(&models.MonthlyBill{})
+	billQPaid := s.db.Model(&models.MonthlyBill{})
+	billQPending := s.db.Model(&models.MonthlyBill{})
+	if prefixRestricted {
+		if len(prefixes) == 0 {
+			// No prefixes → zero results
+			stats.TotalBillsGenerated = 0
+			stats.BillsPaid = 0
+			stats.BillsPending = 0
+		} else {
+			joinCond := "JOIN internet_accounts bill_ia ON bill_ia.id = monthly_bills.internet_account_id"
+			prefixCond, pArgs := buildPrefixWhere("bill_ia", prefixes)
+			billQ = billQ.Joins(joinCond).Where(prefixCond, pArgs...)
+			billQPaid = billQPaid.Joins(joinCond).Where(prefixCond, pArgs...)
+			billQPending = billQPending.Joins(joinCond).Where(prefixCond, pArgs...)
+			billQ.Where("monthly_bills.status != 'cancelled'").Count(&stats.TotalBillsGenerated)
+			billQPaid.Where("monthly_bills.status = 'paid'").Count(&stats.BillsPaid)
+			billQPending.Where("monthly_bills.status IN ('pending', 'due', 'partial')").Count(&stats.BillsPending)
+		}
+	} else {
+		billQ.Where("status != 'cancelled'").Count(&stats.TotalBillsGenerated)
+		billQPaid.Where("status = 'paid'").Count(&stats.BillsPaid)
+		billQPending.Where("status IN ('pending', 'due', 'partial')").Count(&stats.BillsPending)
+	}
 
 	// ── Expense stats ─────────────────────────────────────────────────────────
 	if s.expenseRepo != nil {
@@ -213,7 +259,7 @@ func (s *dashboardService) GetStats() (*DashboardStats, error) {
 	stats.CashInHand = stats.TotalCollection - stats.TotalExpense
 
 	// ── Monthly chart — last 12 months ────────────────────────────────────────
-	stats.MonthlyChart = s.buildMonthlyChart(now)
+	stats.MonthlyChart = s.buildMonthlyChart(now, prefixes, prefixRestricted)
 
 	// ── Recent activity timeline ──────────────────────────────────────────────
 	if s.activityRepo != nil {
@@ -228,16 +274,21 @@ func (s *dashboardService) GetStats() (*DashboardStats, error) {
 	return stats, nil
 }
 
-func (s *dashboardService) buildMonthlyChart(now time.Time) []MonthlyPoint {
+func (s *dashboardService) buildMonthlyChart(now time.Time, prefixes []string, prefixRestricted bool) []MonthlyPoint {
+	prJoin, prWhere, prArgs := s.buildPrefixFilter(prefixes, prefixRestricted, "payment_records", "chart_ia")
 	points := make([]MonthlyPoint, 12)
 	for i := 11; i >= 0; i-- {
-		// Walk back i months from current month
 		t := time.Date(now.Year(), now.Month()-time.Month(i), 1, 0, 0, 0, 0, now.Location())
 		mStart := time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, now.Location())
 		mEnd := time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, now.Location())
 
 		var col, exp float64
-		s.db.Raw(`SELECT COALESCE(SUM(amount), 0) FROM payment_records WHERE paid_at >= ? AND paid_at < ?`, mStart, mEnd).Scan(&col)
+		args := append([]interface{}{mStart, mEnd}, prArgs...)
+		s.db.Raw(
+			`SELECT COALESCE(SUM(amount), 0) FROM payment_records `+prJoin+` WHERE paid_at >= ? AND paid_at < ? `+prWhere,
+			args...,
+		).Scan(&col)
+		// Expenses are company-wide (not per-account) — always unfiltered
 		if s.expenseRepo != nil {
 			exp, _ = s.expenseRepo.Summary(&mStart, &mEnd, nil)
 		}
@@ -252,4 +303,34 @@ func (s *dashboardService) buildMonthlyChart(now time.Time) []MonthlyPoint {
 		}
 	}
 	return points
+}
+
+// buildPrefixFilter returns the JOIN clause and WHERE fragment (with leading space + AND)
+// for scoping payment_records or monthly_bills to accounts whose username matches a prefix.
+// When prefixRestricted=true and prefixes is empty, returns an impossible condition.
+// tableAlias is the alias for the internet_accounts join table.
+func (s *dashboardService) buildPrefixFilter(prefixes []string, prefixRestricted bool, baseTable, tableAlias string) (joinSQL, whereSQL string, args []interface{}) {
+	if !prefixRestricted {
+		return "", "", nil
+	}
+	if len(prefixes) == 0 {
+		// No allowed prefixes → impossible condition, return nothing
+		return "", "AND 1=0", nil
+	}
+	joinSQL = fmt.Sprintf("JOIN internet_accounts %s ON %s.id = %s.internet_account_id", tableAlias, tableAlias, baseTable)
+	cond, a := buildPrefixWhere(tableAlias, prefixes)
+	whereSQL = "AND (" + cond + ")"
+	args = a
+	return
+}
+
+// buildPrefixWhere builds the ILIKE OR condition for prefix matching.
+func buildPrefixWhere(alias string, prefixes []string) (string, []interface{}) {
+	parts := make([]string, len(prefixes))
+	args := make([]interface{}, len(prefixes))
+	for i, p := range prefixes {
+		parts[i] = alias + ".username ILIKE ?"
+		args[i] = p + "%"
+	}
+	return strings.Join(parts, " OR "), args
 }

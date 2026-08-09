@@ -212,6 +212,9 @@ export default function CollectionReportPage() {
   const report = raw?.data?.data;
   const summary = report?.summary;
   const rows = report?.data ?? [];
+  const collectorSummary = report?.collector_summary ?? [];
+  const packageSummary = report?.package_summary ?? [];
+  const dailyChart = report?.daily_chart ?? [];
 
   const years = useMemo(() => {
     const y = [];
@@ -354,12 +357,12 @@ export default function CollectionReportPage() {
               {!isBillingOfficer && (
                 <p className="text-xs text-muted-foreground mb-3">Click a card to see that staff member's collected bill list below.</p>
               )}
-              {report.collector_summary.length === 0 ? (
+              {collectorSummary.length === 0 ? (
                 <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">No collection recorded for this period.</CardContent></Card>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {report.collector_summary.map((c, idx) => {
-                    const totalCollection = report.summary?.collection_amount ?? 0;
+                  {collectorSummary.map((c, idx) => {
+                    const totalCollection = summary?.collection_amount ?? 0;
                     const share = totalCollection > 0 ? (c.collection / totalCollection) * 100 : 0;
                     const colors = [
                       "border-l-blue-500", "border-l-emerald-500", "border-l-violet-500",
@@ -454,9 +457,9 @@ export default function CollectionReportPage() {
                     <th className="text-right px-4 py-2 text-muted-foreground font-medium">Amount</th>
                   </tr></thead>
                   <tbody>
-                    {report.package_summary.length === 0 ? (
+                    {packageSummary.length === 0 ? (
                       <tr><td colSpan={3} className="text-center py-4 text-muted-foreground">No data</td></tr>
-                    ) : report.package_summary.map((p) => (
+                    ) : packageSummary.map((p) => (
                       <tr key={p.package_id} className="border-b last:border-0">
                         <td className="px-4 py-2 font-medium">{p.package_name}</td>
                         <td className="px-4 py-2 text-right">{p.client_count}</td>
@@ -474,11 +477,11 @@ export default function CollectionReportPage() {
                 <CardTitle className="text-sm">Daily Collection</CardTitle>
               </CardHeader>
               <CardContent className="p-2 h-[180px]">
-                {report.daily_chart.length === 0 ? (
+                {dailyChart.length === 0 ? (
                   <div className="flex items-center justify-center h-full text-muted-foreground text-xs">No payments this period</div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={report.daily_chart} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                    <BarChart data={dailyChart} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,100,100,0.15)" />
                       <XAxis dataKey="label" tick={{ fontSize: 9 }} />
                       <YAxis tick={{ fontSize: 9 }} />

@@ -22,7 +22,7 @@ A full-stack management platform for ISPs running MikroTik routers and PON/OLT e
 | **Packages** | Define billable internet packages (price, speed, VAT) |
 | **Profile Mappings** | Link MikroTik PPPoE profiles → billing packages (drives auto-subscription) |
 | **Subscriptions** | One active subscription per customer; auto-assigned on sync or manually set |
-| **Bills** | Monthly invoices — generate, view, record payments with Payment Method + Receipt Number |
+| **Bills** | Monthly invoices — generate, view, collect payments. The **Collect** button shows the customer's total outstanding across all unpaid months and applies the payment oldest-bill-first (carry-forward) |
 | **Notifications** | System alerts (unmapped profiles, bill generation results) |
 
 ### Expenses
@@ -39,11 +39,16 @@ A full-stack management platform for ISPs running MikroTik routers and PON/OLT e
 | **ONU Inventory** | Full ONU list with filters (OLT, port, status, unlinked-only), optical power, distance, and link-to-account action |
 | **SNMP Profiles** | Vendor-specific OID maps — define once, reuse across OLTs. Includes seeded profiles for BDCOM, VSOL, C-Data (EPON) and Huawei, ZTE (GPON) |
 
+### Reports
+| Page | Purpose |
+|------|---------|
+| **Collection Report** | Active User Collection — monthly billing report showing every active customer's bill, paid amount, due, payment status, last payment date, and which billing officer collected. Includes summary cards, staff collection cards (click to filter table), per-package breakdown, daily collection bar chart, CSV export, and a customer detail drawer (click any row). Billing officers see only their own collections; admins see all staff |
+
 ### Admin
 | Page | Purpose |
 |------|---------|
 | **Users** | Staff accounts |
-| **Roles & Permissions** | RBAC — super_admin, admin, billing_officer, operator, viewer |
+| **Roles & Permissions** | RBAC — super_admin, admin, billing_officer, operator, viewer. Non-admin roles support Account Prefix filtering (restrict which Internet Accounts a role can see by username prefix) |
 
 ---
 
@@ -54,7 +59,7 @@ A full-stack management platform for ISPs running MikroTik routers and PON/OLT e
 2. Create Profile Mappings → map MikroTik profile name → Package
 3. Sync Routers            → auto-assigns subscriptions based on each account's profile
 4. Generate Bills          → Bills page → "Generate Bills" → generates for current month
-5. Record Payments         → Bills page → "Record Payment" (select method, enter receipt no.)
+5. Collect Payments        → Bills page → click "Collect" on any row → pay all outstanding bills at once
 6. View Customer Profile   → Internet Accounts → click any username
 ```
 
@@ -69,15 +74,22 @@ The system finds every non-archived, non-disabled account that had an active sub
 - August bill uses the new package (new subscription started before August 1).
 - Historical bills are never recalculated.
 
-### Recording Payments
+### Collecting Payments (Carry-Forward)
 
-Bills → find the bill → **Record Payment**. The dialog accepts:
-- **Amount received** (can be partial — the bill status moves to `partial`)
-- **Payment Method** — Cash, bKash, Bank Transfer, Card, Other
-- **Receipt Number** — optional reference for your records
-- **Notes** — free text
+Bills → find any bill for a customer → click **Collect**. The dialog shows:
 
-Each payment saves a `PaymentRecord`. A bill can have multiple payment records (partial payments over time). When total paid ≥ total amount, status automatically becomes `paid`.
+- A breakdown of **all unpaid/partial bills** for that customer, ordered oldest first
+- Running totals: Bill amount · Already paid · Still due — per month
+- **Total Outstanding** pre-filled in the amount field
+
+Enter the amount collected (can be partial), select payment method and optional receipt number, then click **Collect Payment**. The system distributes the amount oldest-bill-first:
+
+**Example — xyz owes July ৳200 remaining + August ৳500:**
+- Staff collects ৳700 → July cleared (paid), August cleared (paid)
+- Staff collects ৳200 → July cleared (paid), August stays pending
+- Staff collects ৳500 → July cleared (paid), August gets ৳300 applied (partial)
+
+Each disbursement saves a separate `PaymentRecord` per bill. When total paid ≥ total amount on a bill, it automatically moves to `paid`.
 
 ### Customer Profile (Billing History)
 
@@ -102,6 +114,41 @@ The Dashboard shows real-time financial metrics:
 | **Cash in Hand** | Total collection minus total expense |
 
 Charts: 12-month Collection vs Expense vs Cash in Hand (line), expense by category (pie), monthly collection (bar). Activity timeline shows recent actions across all modules.
+
+---
+
+## Collection Report
+
+**Reports → Collection Report** shows the full payment picture for any billing month.
+
+**Default month:** Opens on the current running month.
+
+**Filters:**
+- Month / Year selector
+- Payment Status: All / Paid / Partial / Unpaid / No Bill
+- Additional filters panel: Router
+
+**Summary cards:** Total Active, Collected, Uncollected, Collection Amount, Total Bill, Total Due, Collection Rate %.
+
+### Staff Collection Cards
+
+The report shows a card for each billing officer who collected payments in the selected month. Each card displays:
+- Staff name and role
+- Total amount collected (৳)
+- Number of clients paid
+- Share of total collection (progress bar)
+
+**Admin view:** Click any staff card to filter the bill table below to only show bills collected by that person. A blue banner appears: *"Showing bills collected by [Name]"* with a clear button. Click the card again to deselect.
+
+**Billing Officer view:** Sees only their own card and their own collected bills. Page title shows "My Collection — [Month]".
+
+### Table
+
+Columns: Username · Package · Bill · Paid · Due · Status · Last Payment · Collected By
+
+Click any row to open the **Customer Detail Drawer** showing account info, ONU/network details, current bill breakdown, and last payment date + collector.
+
+**CSV Export** downloads all rows in the current filtered view.
 
 ---
 
@@ -251,7 +298,7 @@ sudo ufw enable
 sudo ufw status
 ```
 
-> **Note:** Do NOT expose ports 8081 (backend) or 5869 (frontend) directly. Nginx will handle all incoming traffic.
+> **Note:** Do NOT expose port 5869 (frontend) directly in production — Nginx handles all incoming traffic. Port 8082 (backend) is accessible on the host for direct API access and debugging, but all browser traffic should go through Nginx.
 
 ### 4. Clone the project
 
@@ -367,7 +414,7 @@ server {
 
     # Backend API — direct pass-through
     location /api/ {
-        proxy_pass http://127.0.0.1:8081;
+        proxy_pass http://127.0.0.1:8082;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -432,7 +479,7 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://127.0.0.1:8081;
+        proxy_pass http://127.0.0.1:8082;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_read_timeout 180s;
@@ -521,7 +568,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-- Backend API: `http://localhost:8081/api/v1`
+- Backend API: `http://localhost:8082/api/v1`
 - Frontend: `http://localhost:5869`
 
 Default login credentials are set via `SUPER_ADMIN_USERNAME` / `SUPER_ADMIN_PASSWORD` in `.env`.
@@ -583,7 +630,9 @@ frontend/
 | `GET` | `/dashboard/stats` | All stats including financial + activity timeline |
 | `GET` | `/dashboard/activities` | Activity log with module + period filters |
 | `GET` | `/internet-accounts/:id/billing-history` | Bills + last payment info for a customer |
-| `PATCH` | `/bills/:id/status` | Record payment (amount, method, receipt, notes) |
+| `GET` | `/bills/account-due?internet_account_id=` | Total outstanding + list of unpaid bills for a customer |
+| `POST` | `/bills/collect` | Collect payment across all unpaid bills oldest-first (carry-forward) |
+| `PATCH` | `/bills/:id/status` | Update a single bill's status / paid amount directly |
 | `POST` | `/internet-accounts/sync-all` | Sync all routers, returns SyncSummary |
 | `GET` | `/snmp-profiles` | List SNMP vendor profiles |
 | `POST` | `/olts` | Add OLT device |
@@ -594,6 +643,8 @@ frontend/
 | `PATCH` | `/onus/:id/link` | Link ONU to an internet account |
 | `GET` | `/expenses` | List expenses with filters |
 | `GET` | `/expenses/summary` | Expense totals by period and category |
+| `GET` | `/reports/active-user-collection` | Collection report: rows, summary, per-collector, per-package, daily chart. Params: `billing_month`, `billing_year`, `payment_status`, `package_id`, `router_id`, `olt_id`, `pon_port_id`, `collector_id`, `search`, `page`, `page_size` |
+| `PUT` | `/roles/:id/account-prefixes` | Set account prefix filter for a role |
 
 ---
 
@@ -603,8 +654,32 @@ frontend/
 |------|--------|
 | `super_admin` | Full access to everything |
 | `admin` | Full access except cannot delete roles |
-| `billing_officer` | View+create+update on billing, packages, subscriptions, expenses; view-only everywhere else |
+| `billing_officer` | View+create+update on billing, packages, subscriptions, expenses, reports; view-only everywhere else |
 | `operator` | View+create+update on routers, PPPoE, internet accounts, and network (OLTs/ONUs); view-only on dashboard and packages |
 | `viewer` | View-only across all modules |
 
 Permissions are module + action pairs (`accounts.view`, `network.update`, etc.) assigned via **Roles & Permissions** in the UI. Only `super_admin` can modify role permission assignments.
+
+### Account Prefix Filter
+
+Non-admin roles (billing_officer, operator, viewer) can be restricted to only see Internet Accounts whose username starts with specific prefixes.
+
+**How to configure:**
+1. Admin → Roles & Permissions → click the role card to expand it
+2. Scroll to **Account Prefix Filter** at the bottom
+3. Type a prefix and press **Enter** (or just click **Save Prefixes** directly)
+4. Add multiple prefixes if needed — the role will see accounts matching any of them
+
+**Behaviour:**
+- **Prefixes set** (e.g. `AB`, `XY`) → user sees only accounts starting with `AB` or `XY`
+- **No prefixes set** → user sees **no accounts** (fully blocked)
+- **admin / super_admin** → always unrestricted; prefix filter is ignored
+
+**Example — two billing officers, each managing a different area:**
+
+| Role assignment | Prefix | Sees |
+|-----------------|--------|------|
+| Hanif (billing_officer) | `AB` | AB-Hanif, AB-Karim, … |
+| Sany (billing_officer) | `XY` | XY-Sany, XY-Rahman, … |
+
+The prefix filter also applies to the Collection Report — a billing officer's report is automatically scoped to their own collections.

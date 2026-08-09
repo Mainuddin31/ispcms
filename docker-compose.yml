@@ -27,24 +27,28 @@ services:
     container_name: ispcms_backend
     env_file: .env
     environment:
-      DB_HOST: 127.0.0.1   # postgres is exposed on host port 5432
-      SERVER_PORT: 8082     # 8080 is taken by another service on this host
-    # network_mode: host gives the backend direct access to the host network stack
-    # so it can reach OLT devices (172.x.x.x) via the server's physical interfaces.
-    network_mode: host
+      DB_HOST: postgres     # container name on ispcms_net
+      SERVER_PORT: 8082
+    ports:
+      - "8082:8082"         # expose for direct API access / debugging
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - ispcms_net
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api/v1
+        API_PROXY_TARGET: http://ispcms_backend:8082
     container_name: ispcms_frontend
     environment:
       NEXT_PUBLIC_API_URL: /api/v1
-      API_PROXY_TARGET: http://127.0.0.1:8082
+      API_PROXY_TARGET: http://ispcms_backend:8082
     ports:
       - "5869:3000"
     depends_on:
