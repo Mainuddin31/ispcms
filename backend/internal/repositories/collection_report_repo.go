@@ -239,8 +239,6 @@ SELECT
 
 func (r *collectionReportRepository) GetSummary(filter CollectionReportFilter) (*CollectionSummary, error) {
 	fromSQL, fromArgs := baseFromJoins(filter.BillingMonth, filter.BillingYear)
-	whereSQL, whereArgs := r.baseWhere(filter)
-	args := append(fromArgs, whereArgs...)
 
 	// We always want all statuses for summary, so strip payment_status from where
 	// by re-building without it:
@@ -270,7 +268,6 @@ SELECT
 		return nil, fmt.Errorf("summary: %w", err)
 	}
 
-	_ = args // suppress unused warning
 	s := &CollectionSummary{
 		ActiveClients:      rs.ActiveClients,
 		CollectedClients:   rs.CollectedClients,
