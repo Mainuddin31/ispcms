@@ -168,7 +168,7 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 	// accounts  = internet account management (/internet-accounts)
 	// pppoe     = raw PPPoE data from routers (/pppoe/secrets, /pppoe/sessions)
 	// network   = OLTs, PON ports, ONUs, SNMP profiles
-	modules := []string{"users", "roles", "routers", "pppoe", "accounts", "dashboard", "billing", "packages", "subscriptions", "notifications", "expenses", "network"}
+	modules := []string{"users", "roles", "routers", "pppoe", "accounts", "dashboard", "billing", "packages", "subscriptions", "notifications", "expenses", "network", "reports"}
 	actions := []string{"view", "create", "update", "delete"}
 	for _, mod := range modules {
 		for _, action := range actions {

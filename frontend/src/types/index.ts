@@ -529,3 +529,77 @@ export interface ApiResponse<T> {
   message?: string;
   error?: string;
 }
+
+// ─── Collection Report ────────────────────────────────────────────────────────
+
+export interface CollectionRow {
+  account_id: string;
+  customer_name: string;
+  username: string;
+  router_name: string;
+  router_id: string;
+  package_name: string;
+  package_id: string;
+  monthly_charge: number;
+  bill_id: string;
+  bill_number: string;
+  total_amount: number;
+  paid_amount: number;
+  due_amount: number;
+  bill_status: string;
+  payment_status: "paid" | "partial" | "unpaid" | "no_bill";
+  last_payment_at: string | null;
+  collector_name: string;
+  collector_id: string;
+  olt_name: string;
+  olt_id: string;
+  pon_port_label: string;
+  pon_port_id: string;
+  onu_id: string;
+  onu_mac: string;
+  onu_status: string;
+}
+
+export interface CollectionSummary {
+  active_clients: number;
+  collected_clients: number;
+  uncollected_clients: number;
+  total_bill: number;
+  collection_amount: number;
+  total_due: number;
+  collection_rate: number;
+}
+
+export interface CollectorSummaryRow {
+  collector_id: string;
+  collector_name: string;
+  client_count: number;
+  collection: number;
+}
+
+export interface PackageSummaryRow {
+  package_id: string;
+  package_name: string;
+  client_count: number;
+  collection: number;
+}
+
+export interface DailyChartPoint {
+  date: string;
+  label: string;
+  collection: number;
+}
+
+export interface CollectionReportData {
+  summary: CollectionSummary;
+  collector_summary: CollectorSummaryRow[];
+  package_summary: PackageSummaryRow[];
+  daily_chart: DailyChartPoint[];
+  data: CollectionRow[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  billing_month: number;
+  billing_year: number;
+}

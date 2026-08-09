@@ -53,6 +53,7 @@ func Setup(db *gorm.DB, cfg *config.Config) (*fiber.App, *services.OLTScheduler)
 	expenseRepo := repositories.NewExpenseRepository(db)
 	activityRepo := repositories.NewActivityLogRepository(db)
 	snmpProfileRepo := repositories.NewSNMPProfileRepository(db)
+	collectionReportRepo := repositories.NewCollectionReportRepository(db)
 	oltRepo := repositories.NewOLTRepository(db)
 	ponPortRepo := repositories.NewPONPortRepository(db)
 	onuRepo := repositories.NewONURepository(db)
@@ -91,6 +92,7 @@ func Setup(db *gorm.DB, cfg *config.Config) (*fiber.App, *services.OLTScheduler)
 	notifH := handlers.NewNotificationHandler(notifSvc)
 	expenseH := handlers.NewExpenseHandler(expenseSvc, expenseCatSvc, activitySvc)
 	snmpProfileH := handlers.NewSNMPProfileHandler(snmpProfileSvc)
+	reportH := handlers.NewReportHandler(collectionReportRepo)
 	oltH := handlers.NewOLTHandler(oltSvc, oltSyncSvc, cfg.JWTSecret)
 	onuH := handlers.NewONUHandler(onuSvc)
 
@@ -256,6 +258,10 @@ func Setup(db *gorm.DB, cfg *config.Config) (*fiber.App, *services.OLTScheduler)
 	onus.Get("/", perm("network", "view"), onuH.List)
 	onus.Get("/:id", perm("network", "view"), onuH.Get)
 	onus.Patch("/:id/link", perm("network", "update"), onuH.Link)
+
+	// Reports
+	reports := api.Group("/reports", jwtAuth)
+	reports.Get("/active-user-collection", perm("reports", "view"), reportH.ActiveUserCollection)
 
 	// Health check
 	app.Get("/health", func(c *fiber.Ctx) error {

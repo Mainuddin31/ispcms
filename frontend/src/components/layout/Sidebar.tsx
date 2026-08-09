@@ -21,6 +21,7 @@ import {
   Tag,
   Server,
   Radio,
+  BarChart2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -40,6 +41,8 @@ const navItems = [
   // Expenses
   { href: "/expenses", label: "Expenses", icon: Receipt, divider: true },
   { href: "/expense-categories", label: "Expense Categories", icon: Tag },
+  // Reports
+  { href: "/collection-report", label: "Collection Report", icon: BarChart2, divider: true },
   // Network / OLT
   { href: "/network", label: "Network", icon: Radio, divider: true },
   { href: "/olts", label: "OLTs", icon: Server },

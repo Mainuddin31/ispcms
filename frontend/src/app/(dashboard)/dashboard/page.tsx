@@ -171,7 +171,10 @@ export default function DashboardPage() {
 
         {/* ── Financial Summary ──────────────────────────────────────────────── */}
         <div className="space-y-2">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Collections</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Collections</p>
+            <a href="/collection-report" className="text-xs text-blue-500 hover:text-blue-400 font-medium">View Details →</a>
+          </div>
           {isLoading ? (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {Array.from({ length: 4 }).map((_, i) => (

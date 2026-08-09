@@ -303,6 +303,23 @@ export const onusApi = {
     api.patch(`/onus/${id}/link`, { internet_account_id }),
 };
 
+// ─── Reports ──────────────────────────────────────────────────────────────────
+export const reportsApi = {
+  activeUserCollection: (params: {
+    billing_month?: number;
+    billing_year?: number;
+    payment_status?: string;
+    package_id?: string;
+    router_id?: string;
+    olt_id?: string;
+    pon_port_id?: string;
+    collector_id?: string;
+    search?: string;
+    page?: number;
+    page_size?: number;
+  }) => api.get("/reports/active-user-collection", { params }),
+};
+
 // ─── PPPoE ────────────────────────────────────────────────────────────────────
 export const pppoeApi = {
   secrets: (params?: {
