@@ -73,10 +73,11 @@ func (r *roleRepository) GetUserPermissions(userID uuid.UUID) ([]models.Permissi
 // prefix filtering entirely. Returns an empty slice (not nil) when no prefixes are set.
 func (r *roleRepository) GetUserAccountPrefixes(userID uuid.UUID) ([]string, bool, error) {
 	var roles []models.Role
-	err := r.db.Raw(`
-		SELECT ro.* FROM roles ro
-		JOIN user_roles ur ON ur.role_id = ro.id
-		WHERE ur.user_id = ? AND ro.deleted_at IS NULL`, userID).Scan(&roles).Error
+	// Use Find (not Raw/Scan) so GORM properly invokes sql.Scanner on StringSlice fields.
+	err := r.db.
+		Joins("JOIN user_roles ur ON ur.role_id = roles.id").
+		Where("ur.user_id = ? AND roles.deleted_at IS NULL", userID).
+		Find(&roles).Error
 	if err != nil {
 		return nil, false, err
 	}

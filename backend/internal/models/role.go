@@ -19,6 +19,10 @@ func (s StringSlice) Value() (driver.Value, error) {
 }
 
 func (s *StringSlice) Scan(value interface{}) error {
+	if value == nil {
+		*s = StringSlice{}
+		return nil
+	}
 	var bytes []byte
 	switch v := value.(type) {
 	case []byte:
@@ -27,6 +31,10 @@ func (s *StringSlice) Scan(value interface{}) error {
 		bytes = []byte(v)
 	default:
 		return fmt.Errorf("StringSlice: cannot scan type %T", value)
+	}
+	if len(bytes) == 0 {
+		*s = StringSlice{}
+		return nil
 	}
 	return json.Unmarshal(bytes, s)
 }
