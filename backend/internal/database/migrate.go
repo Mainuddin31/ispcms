@@ -168,7 +168,7 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 	// accounts  = internet account management (/internet-accounts)
 	// pppoe     = raw PPPoE data from routers (/pppoe/secrets, /pppoe/sessions)
 	// network   = OLTs, PON ports, ONUs, SNMP profiles
-	modules := []string{"users", "roles", "routers", "pppoe", "accounts", "dashboard", "billing", "packages", "subscriptions", "notifications", "expenses", "network", "reports"}
+	modules := []string{"users", "roles", "routers", "pppoe", "accounts", "dashboard", "billing", "packages", "profile_mappings", "subscriptions", "notifications", "expenses", "network", "reports"}
 	actions := []string{"view", "create", "update", "delete"}
 	for _, mod := range modules {
 		for _, action := range actions {
@@ -208,7 +208,7 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 	db.First(&billingOfficerRole, "name = ?", "billing_officer")
 	for _, p := range allPerms {
 		allowed := false
-		if (p.Module == "billing" || p.Module == "packages" || p.Module == "subscriptions" || p.Module == "notifications") &&
+		if (p.Module == "billing" || p.Module == "packages" || p.Module == "profile_mappings" || p.Module == "subscriptions" || p.Module == "notifications") &&
 			(p.Action == "view" || p.Action == "create" || p.Action == "update") {
 			allowed = true
 		}

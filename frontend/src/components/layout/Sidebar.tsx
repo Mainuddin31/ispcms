@@ -25,37 +25,55 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 
-const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/routers", label: "Routers", icon: Router },
-  { href: "/internet-accounts", label: "Internet Accounts", icon: Globe },
-  { href: "/pppoe", label: "PPPoE Secrets", icon: Network },
-  { href: "/sessions", label: "Active Sessions", icon: Wifi },
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ElementType;
+  divider?: boolean;
+  // permission required to see this item — undefined means always visible
+  module?: string;
+  action?: string;
+}
+
+const navItems: NavItem[] = [
+  { href: "/dashboard",         label: "Dashboard",          icon: LayoutDashboard, module: "dashboard",        action: "view" },
+  // Infrastructure
+  { href: "/routers",           label: "Routers",            icon: Router,          module: "routers",          action: "view" },
+  { href: "/internet-accounts", label: "Internet Accounts",  icon: Globe,           module: "accounts",         action: "view" },
+  { href: "/pppoe",             label: "PPPoE Secrets",      icon: Network,         module: "pppoe",            action: "view" },
+  { href: "/sessions",          label: "Active Sessions",    icon: Wifi,            module: "pppoe",            action: "view" },
   // Billing
-  { href: "/packages", label: "Packages", icon: Package, divider: true },
-  { href: "/profile-mappings", label: "Profile Mappings", icon: ArrowLeftRight },
-  { href: "/subscriptions", label: "Subscriptions", icon: CreditCard },
-  { href: "/bills", label: "Bills", icon: FileText },
-  { href: "/notifications", label: "Notifications", icon: Bell },
+  { href: "/packages",          label: "Packages",           icon: Package,         module: "packages",         action: "view", divider: true },
+  { href: "/profile-mappings",  label: "Profile Mappings",   icon: ArrowLeftRight,  module: "profile_mappings", action: "view" },
+  { href: "/subscriptions",     label: "Subscriptions",      icon: CreditCard,      module: "subscriptions",    action: "view" },
+  { href: "/bills",             label: "Bills",              icon: FileText,        module: "billing",          action: "view" },
+  { href: "/notifications",     label: "Notifications",      icon: Bell,            module: "notifications",    action: "view" },
   // Expenses
-  { href: "/expenses", label: "Expenses", icon: Receipt, divider: true },
-  { href: "/expense-categories", label: "Expense Categories", icon: Tag },
+  { href: "/expenses",          label: "Expenses",           icon: Receipt,         module: "expenses",         action: "view", divider: true },
+  { href: "/expense-categories",label: "Expense Categories", icon: Tag,             module: "expenses",         action: "view" },
   // Reports
-  { href: "/collection-report", label: "Collection Report", icon: BarChart2, divider: true },
+  { href: "/collection-report", label: "Collection Report",  icon: BarChart2,       module: "reports",          action: "view", divider: true },
   // Network / OLT
-  { href: "/network", label: "Network", icon: Radio, divider: true },
-  { href: "/olts", label: "OLTs", icon: Server },
-  { href: "/onus", label: "ONU Inventory", icon: Wifi },
-  { href: "/snmp-profiles", label: "SNMP Profiles", icon: Network },
+  { href: "/network",           label: "Network",            icon: Radio,           module: "network",          action: "view", divider: true },
+  { href: "/olts",              label: "OLTs",               icon: Server,          module: "network",          action: "view" },
+  { href: "/onus",              label: "ONU Inventory",      icon: Wifi,            module: "network",          action: "view" },
+  { href: "/snmp-profiles",     label: "SNMP Profiles",      icon: Network,         module: "network",          action: "view" },
   // Admin
-  { href: "/users", label: "Users", icon: Users, divider: true },
-  { href: "/roles", label: "Roles & Permissions", icon: Shield },
+  { href: "/users",             label: "Users",              icon: Users,           module: "users",            action: "view", divider: true },
+  { href: "/roles",             label: "Roles & Permissions",icon: Shield,          module: "roles",            action: "view" },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const { hasPermission } = useAuth();
+
+  const visibleItems = navItems.filter(({ module, action }) => {
+    if (!module || !action) return true;
+    return hasPermission(module, action);
+  });
 
   return (
     <aside
@@ -80,7 +98,7 @@ export function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 py-4 overflow-y-auto">
         <ul className="space-y-1 px-2">
-          {navItems.map(({ href, label, icon: Icon, divider }) => {
+          {visibleItems.map(({ href, label, icon: Icon, divider }) => {
             const active = pathname === href || pathname.startsWith(href + "/");
             return (
               <li key={href}>

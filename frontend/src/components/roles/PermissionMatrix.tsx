@@ -11,6 +11,14 @@ import { cn } from "@/lib/utils";
 
 const ACTIONS = ["view", "create", "update", "delete"];
 
+const MODULE_LABELS: Record<string, string> = {
+  profile_mappings: "Profile Mappings",
+};
+
+function moduleLabel(mod: string): string {
+  return MODULE_LABELS[mod] ?? mod.charAt(0).toUpperCase() + mod.slice(1);
+}
+
 interface Props {
   role: Role;
   allPermissions: Permission[];
@@ -68,7 +76,7 @@ export function PermissionMatrix({ role, allPermissions }: Props) {
           <tbody>
             {modules.map((mod) => (
               <tr key={mod} className="border-t">
-                <td className="py-2 font-medium capitalize">{mod}</td>
+                <td className="py-2 font-medium">{moduleLabel(mod)}</td>
                 {ACTIONS.map((action) => {
                   const permId = getPermId(mod, action);
                   const checked = permId ? selected.has(permId) : false;

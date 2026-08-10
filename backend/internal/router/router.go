@@ -181,12 +181,12 @@ func Setup(db *gorm.DB, cfg *config.Config) (*fiber.App, *services.OLTScheduler)
 
 	// Profile Mappings
 	pm := api.Group("/profile-mappings", jwtAuth)
-	pm.Get("/", perm("billing", "view"), profileMappingH.List)
-	pm.Get("/unmapped", perm("billing", "view"), profileMappingH.UnmappedProfiles)
-	pm.Post("/", perm("billing", "create"), profileMappingH.Create)
-	pm.Get("/:id", perm("billing", "view"), profileMappingH.Get)
-	pm.Put("/:id", perm("billing", "update"), profileMappingH.Update)
-	pm.Delete("/:id", perm("billing", "delete"), profileMappingH.Delete)
+	pm.Get("/", perm("profile_mappings", "view"), profileMappingH.List)
+	pm.Get("/unmapped", perm("profile_mappings", "view"), profileMappingH.UnmappedProfiles)
+	pm.Post("/", perm("profile_mappings", "create"), profileMappingH.Create)
+	pm.Get("/:id", perm("profile_mappings", "view"), profileMappingH.Get)
+	pm.Put("/:id", perm("profile_mappings", "update"), profileMappingH.Update)
+	pm.Delete("/:id", perm("profile_mappings", "delete"), profileMappingH.Delete)
 
 	// Subscriptions
 	subs := api.Group("/subscriptions", jwtAuth)
