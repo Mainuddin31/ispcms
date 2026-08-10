@@ -101,19 +101,37 @@ On the **Internet Accounts** page, click any username to open the Customer Profi
 
 ### Dashboard — Financial Stats
 
-The Dashboard shows real-time financial metrics:
+The Dashboard shows real-time financial metrics. **Sections are shown only if the logged-in user has the relevant permission.** Data is automatically scoped to the user's account prefix (billing officers and operators see only their assigned customers).
 
-| Metric | Source |
-|--------|--------|
-| **Today's Collection** | Sum of payments received today |
-| **This Month** | Sum of payments received this calendar month |
-| **Total Collection** | All-time payment sum |
-| **Outstanding Due** | Sum of `due_amount` on all non-paid, non-cancelled bills |
-| **Today's Expense** | Expenses recorded today |
-| **Monthly Expense** | Expenses recorded this calendar month |
-| **Cash in Hand** | Total collection minus total expense |
+**Collections** (visible if `billing: view`):
 
-Charts: 12-month Collection vs Expense vs Cash in Hand (line), expense by category (pie), monthly collection (bar). Activity timeline shows recent actions across all modules.
+| Card | Source |
+|------|--------|
+| Today's Collection | Payments received today |
+| This Month | Payments received this calendar month |
+| Last Month | Payments received last calendar month |
+| Outstanding Due | Sum of `due_amount` on all unpaid/partial bills |
+
+**Expenses** (visible if `expenses: view`):
+
+| Card | Source |
+|------|--------|
+| Today's Expense | Expenses recorded today |
+| This Month | Expenses recorded this calendar month |
+| Last Month | Expenses recorded last calendar month |
+| Cash in Hand | This month collection − this month expense |
+
+> Billing officers who have `billing: view` but not `expenses: view` still see a **Cash in Hand** card showing their monthly net.
+
+**Charts** (visible if `billing: view` or `expenses: view`): 12-month Collection vs Expense vs Cash in Hand (line), expense by category pie (this month), monthly collection bar chart.
+
+**Network / Routers** (visible if `routers: view`): Router online/offline counts, active PPPoE sessions, recent sync logs.
+
+**Internet Accounts** (visible if `accounts: view`): Total/online/offline/disabled account counts — scoped to the user's prefix.
+
+**Billing Stats** (visible if `billing: view`): Packages, subscriptions, bills generated, paid, pending.
+
+**Activity Timeline**: Visible to all dashboard users. Shows recent system activity.
 
 ---
 
@@ -650,15 +668,29 @@ frontend/
 
 ## Roles & Permissions
 
-| Role | Access |
-|------|--------|
-| `super_admin` | Full access to everything |
-| `admin` | Full access except cannot delete roles |
-| `billing_officer` | View+create+update on billing, packages, subscriptions, expenses, reports; view-only everywhere else |
-| `operator` | View+create+update on routers, PPPoE, internet accounts, and network (OLTs/ONUs); view-only on dashboard and packages |
-| `viewer` | View-only across all modules |
+| Role | Dashboard Sections Visible | Access |
+|------|---------------------------|--------|
+| `super_admin` | Everything | Full access to all modules |
+| `admin` | Everything | Full access; cannot delete roles |
+| `billing_officer` | Collections · Billing Stats · Accounts · Cash in Hand · Activity | billing, packages, subscriptions, reports (view/create/update); accounts (view); dashboard (view). Prefix-scoped. |
+| `service_technician` | Network · Accounts · Activity · Recent Syncs | routers, PPPoE, accounts, network/OLT/ONU (view/create/update); dashboard (view). Prefix-scoped. |
+| `operator` | Network · Accounts · Activity · Recent Syncs | routers, PPPoE, accounts, network (view/create/update); dashboard (view) |
+| `viewer` | Sections matching their granted permissions | View-only across assigned modules |
 
-Permissions are module + action pairs (`accounts.view`, `network.update`, etc.) assigned via **Roles & Permissions** in the UI. Only `super_admin` can modify role permission assignments.
+Permissions are module + action pairs (`accounts.view`, `billing.update`, etc.) assigned via **Roles & Permissions** in the UI. Only `super_admin` can modify role permission assignments.
+
+**Dashboard section visibility rules:**
+
+| Section | Required permission |
+|---------|-------------------|
+| Collections | `billing: view` |
+| Expenses | `expenses: view` |
+| Cash in Hand | `billing: view` (shown even without expenses permission) |
+| Billing Stats | `billing: view` |
+| Network / Routers | `routers: view` |
+| Recent Syncs | `routers: view` |
+| Internet Accounts | `accounts: view` |
+| Activity Timeline | `dashboard: view` (all users) |
 
 ### Account Prefix Filter
 
@@ -682,4 +714,8 @@ Non-admin roles (billing_officer, operator, viewer) can be restricted to only se
 | Hanif (billing_officer) | `AB` | AB-Hanif, AB-Karim, … |
 | Sany (billing_officer) | `XY` | XY-Sany, XY-Rahman, … |
 
-The prefix filter also applies to the Collection Report — a billing officer's report is automatically scoped to their own collections.
+The prefix filter is enforced system-wide — it applies to:
+- **Internet Accounts** page
+- **Bills** page
+- **Collection Report** — billing officer sees only their own accounts' bills
+- **Dashboard** — collections, outstanding due, bill counts, and account stats are all scoped to the user's prefix accounts

@@ -48,6 +48,7 @@ import {
 } from "recharts";
 import { dashboardApi } from "@/lib/api";
 import { DashboardStats, ActivityLog } from "@/types";
+import { useAuth } from "@/contexts/AuthContext";
 import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -131,6 +132,14 @@ function activityMeta(a: ActivityLog) {
 export default function DashboardPage() {
   const [activityPeriod, setActivityPeriod] = useState("30days");
   const [activityModule, setActivityModule] = useState("");
+  const { hasPermission } = useAuth();
+
+  // Permission flags — drive section visibility
+  const canBilling  = hasPermission("billing",  "view");
+  const canExpenses = hasPermission("expenses", "view");
+  const canRouters  = hasPermission("routers",  "view");
+  const canAccounts = hasPermission("accounts", "view");
+  const canReports  = hasPermission("reports",  "view");
 
   const { data, isLoading, refetch, isFetching } = useQuery<{ data: { data: DashboardStats } }>({
     queryKey: ["dashboard-stats"],
@@ -169,54 +178,74 @@ export default function DashboardPage() {
           </Button>
         </div>
 
-        {/* ── Financial Summary ──────────────────────────────────────────────── */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Collections</p>
-            <a href="/collection-report" className="text-xs text-blue-500 hover:text-blue-400 font-medium">View Details →</a>
+        {/* ── Collections ───────────────────────────────────────────────────── */}
+        {canBilling && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Collections</p>
+              {canReports && (
+                <a href="/collection-report" className="text-xs text-blue-500 hover:text-blue-400 font-medium">View Details →</a>
+              )}
+            </div>
+            {isLoading ? (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Card key={i}><CardContent className="p-5"><Skeleton className="h-4 w-24 mb-2" /><Skeleton className="h-7 w-20" /></CardContent></Card>
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard title="Today's Collection" value={fmt(stats?.today_collection ?? 0)} icon={ArrowDownCircle} color="bg-emerald-500" />
+                <StatCard title="This Month" value={fmt(stats?.monthly_collection ?? 0)} icon={TrendingUp} color="bg-green-600" />
+                <StatCard title="Last Month" value={fmt(stats?.last_month_collection ?? 0)} icon={Banknote} color="bg-teal-600" />
+                <StatCard title="Outstanding Due" value={fmt(stats?.total_outstanding_due ?? 0)} icon={AlertTriangle} color={(stats?.total_outstanding_due ?? 0) > 0 ? "bg-red-500" : "bg-slate-400"} />
+              </div>
+            )}
           </div>
-          {isLoading ? (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Card key={i}><CardContent className="p-5"><Skeleton className="h-4 w-24 mb-2" /><Skeleton className="h-7 w-20" /></CardContent></Card>
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard title="Today's Collection" value={fmt(stats?.today_collection ?? 0)} icon={ArrowDownCircle} color="bg-emerald-500" />
-              <StatCard title="This Month" value={fmt(stats?.monthly_collection ?? 0)} icon={TrendingUp} color="bg-green-600" />
-              <StatCard title="Last Month" value={fmt(stats?.last_month_collection ?? 0)} icon={Banknote} color="bg-teal-600" />
-              <StatCard title="Outstanding Due" value={fmt(stats?.total_outstanding_due ?? 0)} icon={AlertTriangle} color={(stats?.total_outstanding_due ?? 0) > 0 ? "bg-red-500" : "bg-slate-400"} />
-            </div>
-          )}
-        </div>
+        )}
 
-        <div className="space-y-2">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Expenses</p>
-          {isLoading ? (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Card key={i}><CardContent className="p-5"><Skeleton className="h-4 w-24 mb-2" /><Skeleton className="h-7 w-20" /></CardContent></Card>
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <StatCard title="Today's Expense" value={fmt(stats?.today_expense ?? 0)} icon={ArrowUpCircle} color="bg-orange-500" />
-              <StatCard title="This Month" value={fmt(stats?.monthly_expense ?? 0)} icon={Receipt} color="bg-amber-500" />
-              <StatCard title="Last Month" value={fmt(stats?.last_month_expense ?? 0)} icon={Wallet} color="bg-red-400" />
-              <StatCard
-                title="Cash in Hand"
-                value={fmt((stats?.monthly_collection ?? 0) - (stats?.monthly_expense ?? 0))}
-                icon={ShieldCheck}
-                color={((stats?.monthly_collection ?? 0) - (stats?.monthly_expense ?? 0)) >= 0 ? "bg-indigo-600" : "bg-red-600"}
-                sub="This month collection − expense"
-              />
-            </div>
-          )}
-        </div>
+        {/* ── Expenses ──────────────────────────────────────────────────────── */}
+        {canExpenses && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Expenses</p>
+            {isLoading ? (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Card key={i}><CardContent className="p-5"><Skeleton className="h-4 w-24 mb-2" /><Skeleton className="h-7 w-20" /></CardContent></Card>
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard title="Today's Expense" value={fmt(stats?.today_expense ?? 0)} icon={ArrowUpCircle} color="bg-orange-500" />
+                <StatCard title="This Month" value={fmt(stats?.monthly_expense ?? 0)} icon={Receipt} color="bg-amber-500" />
+                <StatCard title="Last Month" value={fmt(stats?.last_month_expense ?? 0)} icon={Wallet} color="bg-red-400" />
+                <StatCard
+                  title="Cash in Hand"
+                  value={fmt((stats?.monthly_collection ?? 0) - (stats?.monthly_expense ?? 0))}
+                  icon={ShieldCheck}
+                  color={((stats?.monthly_collection ?? 0) - (stats?.monthly_expense ?? 0)) >= 0 ? "bg-indigo-600" : "bg-red-600"}
+                  sub="This month collection − expense"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Cash in Hand for billing officers who can't see Expenses section */}
+        {canBilling && !canExpenses && !isLoading && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              title="Cash in Hand"
+              value={fmt((stats?.monthly_collection ?? 0) - (stats?.monthly_expense ?? 0))}
+              icon={ShieldCheck}
+              color={((stats?.monthly_collection ?? 0) - (stats?.monthly_expense ?? 0)) >= 0 ? "bg-indigo-600" : "bg-red-600"}
+              sub="This month collection − expense"
+            />
+          </div>
+        )}
 
         {/* ── Charts ─────────────────────────────────────────────────────────── */}
-        {!isLoading && (stats?.monthly_chart?.length ?? 0) > 0 && (
+        {(canBilling || canExpenses) && !isLoading && (stats?.monthly_chart?.length ?? 0) > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Collection vs Expense line chart */}
             <Card className="lg:col-span-2">
@@ -285,7 +314,7 @@ export default function DashboardPage() {
         )}
 
         {/* ── Monthly Collection Bar Chart ───────────────────────────────────── */}
-        {!isLoading && (stats?.monthly_chart?.length ?? 0) > 0 && (
+        {canBilling && !isLoading && (stats?.monthly_chart?.length ?? 0) > 0 && (
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold">Monthly Collection</CardTitle>
@@ -305,7 +334,7 @@ export default function DashboardPage() {
         )}
 
         {/* ── Billing Stats ──────────────────────────────────────────────────── */}
-        {((stats?.total_packages ?? 0) > 0 || (stats?.active_subscriptions ?? 0) > 0) && (
+        {canBilling && ((stats?.total_packages ?? 0) > 0 || (stats?.active_subscriptions ?? 0) > 0) && (
           <div className="space-y-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Billing</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -319,30 +348,36 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* ── Network Stats ──────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Network</p>
-            <div className="grid grid-cols-2 gap-3">
-              <StatCard title="Total Routers" value={stats?.total_routers ?? 0} icon={Router} color="bg-blue-500" />
-              <StatCard title="Online Routers" value={stats?.online_routers ?? 0} icon={Wifi} color="bg-emerald-500" />
-              <StatCard title="Offline Routers" value={stats?.offline_routers ?? 0} icon={WifiOff} color="bg-red-500" />
-              <StatCard title="Active Sessions" value={stats?.active_sessions ?? 0} icon={Activity} color="bg-cyan-500" />
-            </div>
+        {/* ── Network Stats & Internet Accounts ─────────────────────────────── */}
+        {(canRouters || canAccounts) && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {canRouters && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Network</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <StatCard title="Total Routers" value={stats?.total_routers ?? 0} icon={Router} color="bg-blue-500" />
+                  <StatCard title="Online Routers" value={stats?.online_routers ?? 0} icon={Wifi} color="bg-emerald-500" />
+                  <StatCard title="Offline Routers" value={stats?.offline_routers ?? 0} icon={WifiOff} color="bg-red-500" />
+                  <StatCard title="Active Sessions" value={stats?.active_sessions ?? 0} icon={Activity} color="bg-cyan-500" />
+                </div>
+              </div>
+            )}
+            {canAccounts && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Internet Accounts</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <StatCard title="Total Accounts" value={stats?.total_accounts ?? 0} icon={Globe} color="bg-violet-500" />
+                  <StatCard title="Online" value={stats?.online_accounts ?? 0} icon={UserCheck} color="bg-teal-500" />
+                  <StatCard title="Offline" value={stats?.offline_accounts ?? 0} icon={WifiOff} color="bg-slate-400" />
+                  <StatCard title="Disabled" value={stats?.disabled_accounts ?? 0} icon={UserX} color="bg-orange-500" />
+                </div>
+              </div>
+            )}
           </div>
-          <div className="space-y-2">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Internet Accounts</p>
-            <div className="grid grid-cols-2 gap-3">
-              <StatCard title="Total Accounts" value={stats?.total_accounts ?? 0} icon={Globe} color="bg-violet-500" />
-              <StatCard title="Online" value={stats?.online_accounts ?? 0} icon={UserCheck} color="bg-teal-500" />
-              <StatCard title="Offline" value={stats?.offline_accounts ?? 0} icon={WifiOff} color="bg-slate-400" />
-              <StatCard title="Disabled" value={stats?.disabled_accounts ?? 0} icon={UserX} color="bg-orange-500" />
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* ── Activity Timeline + Recent Syncs ──────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className={`grid grid-cols-1 ${canRouters ? "lg:grid-cols-2" : ""} gap-6`}>
           {/* Activity Timeline */}
           <Card>
             <CardHeader className="pb-3">
@@ -415,38 +450,40 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          {/* Recent Syncs */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold">Recent Synchronizations</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <div className="space-y-3">
-                  {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
-                </div>
-              ) : !stats?.recent_sync_logs?.length ? (
-                <p className="text-sm text-muted-foreground text-center py-12">No sync records</p>
-              ) : (
-                <div className="space-y-3">
-                  {stats.recent_sync_logs.map((log) => (
-                    <div key={log.id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium truncate">{log.router?.name ?? "Unknown router"}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {log.secrets_total} secrets · {log.new_accounts ?? 0} new · {log.duration_ms}ms
-                        </p>
+          {/* Recent Syncs — only for users with router access */}
+          {canRouters && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-semibold">Recent Synchronizations</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {isLoading ? (
+                  <div className="space-y-3">
+                    {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+                  </div>
+                ) : !stats?.recent_sync_logs?.length ? (
+                  <p className="text-sm text-muted-foreground text-center py-12">No sync records</p>
+                ) : (
+                  <div className="space-y-3">
+                    {stats.recent_sync_logs.map((log) => (
+                      <div key={log.id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{log.router?.name ?? "Unknown router"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {log.secrets_total} secrets · {log.new_accounts ?? 0} new · {log.duration_ms}ms
+                          </p>
+                        </div>
+                        <div className="text-right flex-shrink-0 ml-3">
+                          <StatusBadge status={log.status} />
+                          <p className="text-xs text-muted-foreground mt-1">{formatRelative(log.started_at)}</p>
+                        </div>
                       </div>
-                      <div className="text-right flex-shrink-0 ml-3">
-                        <StatusBadge status={log.status} />
-                        <p className="text-xs text-muted-foreground mt-1">{formatRelative(log.started_at)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Last sync footer */}
