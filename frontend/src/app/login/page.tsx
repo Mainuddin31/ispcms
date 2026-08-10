@@ -122,9 +122,6 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p className="text-center text-slate-500 text-xs mt-6">
-          Default: superadmin / Admin@1234
-        </p>
       </div>
     </div>
   );

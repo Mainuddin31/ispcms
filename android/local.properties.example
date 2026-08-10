@@ -1,0 +1,11 @@
+# Copy this file to local.properties and set your actual API URLs.
+# local.properties is gitignored — never commit real server addresses.
+
+# Development
+dev.api.url=http://172.17.8.2:58690/api/v1
+
+# Staging server
+staging.api.url=https://staging.example.com/api/v1
+
+# Production server
+prod.api.url=https://103.xxx.xxx.xxx/api/v1

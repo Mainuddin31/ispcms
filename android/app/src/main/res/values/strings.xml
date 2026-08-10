@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- app_name is overridden per flavor via resValue() in build.gradle.kts -->
+    <string name="app_name">IBMS</string>
+
+    <!-- Auth -->
+    <string name="login_title">Sign In</string>
+    <string name="login_subtitle">ISP Business Management System</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="sign_in">Sign In</string>
+    <string name="signing_in">Signing in…</string>
+
+    <!-- Navigation -->
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_accounts">Accounts</string>
+    <string name="nav_bills">Bills</string>
+    <string name="nav_report">Report</string>
+    <string name="nav_more">More</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_title">Dashboard</string>
+    <string name="today_collection">Today\'s Collection</string>
+    <string name="total_collected">Total Collected</string>
+    <string name="outstanding_due">Outstanding Due</string>
+    <string name="today_expense">Today\'s Expense</string>
+    <string name="total_expense">Total Expense</string>
+    <string name="cash_in_hand">Cash in Hand</string>
+    <string name="last_month">Last month %s</string>
+
+    <!-- Common -->
+    <string name="loading">Loading…</string>
+    <string name="retry">Retry</string>
+    <string name="logout">Logout</string>
+    <string name="profile">Profile</string>
+    <string name="search">Search</string>
+    <string name="collect">Collect</string>
+    <string name="cancel">Cancel</string>
+    <string name="amount">Amount</string>
+    <string name="tk">৳</string>
+</resources>
