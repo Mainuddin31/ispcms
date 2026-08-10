@@ -1,6 +1,6 @@
 # IBMS — ISP Business Management System
 
-A full-stack management platform for ISPs running MikroTik routers and PON/OLT equipment. Manages PPPoE customers, billing packages, monthly invoicing, payment collection, expenses, and OLT/ONU network inventory.
+A full-stack management platform for ISPs running MikroTik routers and PON/OLT equipment. Manages PPPoE customers, billing packages, monthly invoicing, payment collection, expenses, OLT/ONU network inventory, and role-based access control with account prefix scoping.
 
 **Stack:** Go 1.22 · Fiber v2 · GORM · PostgreSQL · Next.js 14 · TypeScript · Tailwind · shadcn/ui · Docker Compose
 
@@ -20,9 +20,9 @@ A full-stack management platform for ISPs running MikroTik routers and PON/OLT e
 | Page | Purpose |
 |------|---------|
 | **Packages** | Define billable internet packages (price, speed, VAT) |
-| **Profile Mappings** | Link MikroTik PPPoE profiles → billing packages (drives auto-subscription) |
-| **Subscriptions** | One active subscription per customer; auto-assigned on sync or manually set |
-| **Bills** | Monthly invoices — generate, view, collect payments. The **Collect** button shows the customer's total outstanding across all unpaid months and applies the payment oldest-bill-first (carry-forward) |
+| **Profile Mappings** | Link MikroTik PPPoE profiles → billing packages (drives auto-subscription). Controlled by its own `profile_mappings` permission |
+| **Subscriptions** | One active subscription per customer; auto-assigned on sync or manually set. Controlled by `subscriptions` permission |
+| **Bills** | Monthly invoices — generate, view, collect payments. The **Collect** button shows all outstanding bills across months and applies payment oldest-first (carry-forward) |
 | **Notifications** | System alerts (unmapped profiles, bill generation results) |
 
 ### Expenses
@@ -37,134 +37,133 @@ A full-stack management platform for ISPs running MikroTik routers and PON/OLT e
 | **Network Dashboard** | Stats overview — OLT count, PON ports, ONU online/offline/unassigned, port utilization, recent sync activity |
 | **OLTs** | Add/edit OLT devices (SNMP v2c or v3), trigger manual sync, view per-OLT sync logs |
 | **ONU Inventory** | Full ONU list with filters (OLT, port, status, unlinked-only), optical power, distance, and link-to-account action |
-| **SNMP Profiles** | Vendor-specific OID maps — define once, reuse across OLTs. Includes seeded profiles for BDCOM, VSOL, C-Data (EPON) and Huawei, ZTE (GPON) |
+| **SNMP Profiles** | Vendor-specific OID maps — define once, reuse across OLTs |
 
 ### Reports
 | Page | Purpose |
 |------|---------|
-| **Collection Report** | Active User Collection — monthly billing report showing every active customer's bill, paid amount, due, payment status, last payment date, and which billing officer collected. Includes summary cards, staff collection cards (click to filter table), per-package breakdown, daily collection bar chart, CSV export, and a customer detail drawer (click any row). Billing officers see only their own collections; admins see all staff |
+| **Collection Report** | Active User Collection — monthly billing report per customer showing bill, paid, due, status, collector. Includes summary cards, staff collection cards, per-package breakdown, daily bar chart, CSV export, and customer detail drawer. Prefix-scoped: billing officers see only their own accounts |
 
 ### Admin
 | Page | Purpose |
 |------|---------|
 | **Users** | Staff accounts |
-| **Roles & Permissions** | RBAC — super_admin, admin, billing_officer, operator, viewer. Non-admin roles support Account Prefix filtering (restrict which Internet Accounts a role can see by username prefix) |
+| **Roles & Permissions** | RBAC with granular module permissions. Non-admin roles support Account Prefix filtering |
+
+> **Sidebar visibility:** Each page in the sidebar is shown only if the logged-in user has the required permission for that module. Users only see what they are allowed to access.
 
 ---
 
 ## Billing Flow
 
 ```
-1. Create Packages         → define price, speed, VAT
-2. Create Profile Mappings → map MikroTik profile name → Package
-3. Sync Routers            → auto-assigns subscriptions based on each account's profile
-4. Generate Bills          → Bills page → "Generate Bills" → generates for current month
-5. Collect Payments        → Bills page → click "Collect" on any row → pay all outstanding bills at once
-6. View Customer Profile   → Internet Accounts → click any username
+1. Create Packages          → define price, speed, VAT
+2. Create Profile Mappings  → map MikroTik profile name → Package
+3. Sync Routers             → auto-assigns subscriptions based on each account's profile
+4. Generate Bills           → Bills page → "Generate Bills" → generates for current month
+5. Collect Payments         → Bills page → click "Collect" on any row → pay all outstanding bills at once
+6. View Customer Profile    → Internet Accounts → click any username
 ```
 
-### How bill generation works
+### How Bill Generation Works
 
 Bills → **Generate Bills** → click Generate (current month only).
 
-The system finds every non-archived, non-disabled account that had an active subscription on the **1st of the billing month**, creates one bill, and skips duplicates automatically. A generation log records how many were created vs skipped and why.
+The system finds every non-archived, non-disabled account that had an active subscription on the **1st of the billing month**, creates one bill, and skips duplicates. A generation log records how many were created vs skipped and why.
 
 **Package change rules:**
 - If a customer changed packages on July 18, the July bill still uses the old package (billing date = July 1).
-- August bill uses the new package (new subscription started before August 1).
+- August bill uses the new package.
 - Historical bills are never recalculated.
 
 ### Collecting Payments (Carry-Forward)
 
 Bills → find any bill for a customer → click **Collect**. The dialog shows:
 
-- A breakdown of **all unpaid/partial bills** for that customer, ordered oldest first
-- Running totals: Bill amount · Already paid · Still due — per month
+- All unpaid/partial bills for that customer, ordered oldest first
+- Per-row: Bill amount · Already paid · Still due
 - **Total Outstanding** pre-filled in the amount field
 
-Enter the amount collected (can be partial), select payment method and optional receipt number, then click **Collect Payment**. The system distributes the amount oldest-bill-first:
+Enter the amount (can be partial), select payment method and optional receipt number, click **Collect Payment**. The system distributes oldest-bill-first:
 
-**Example — xyz owes July ৳200 remaining + August ৳500:**
-- Staff collects ৳700 → July cleared (paid), August cleared (paid)
-- Staff collects ৳200 → July cleared (paid), August stays pending
-- Staff collects ৳500 → July cleared (paid), August gets ৳300 applied (partial)
+| Staff collects | Result |
+|----------------|--------|
+| ৳700 (Jul ৳200 + Aug ৳500 owed) | Jul → paid, Aug → paid |
+| ৳200 | Jul → paid, Aug → still pending |
+| ৳500 | Jul → paid, Aug → ৳300 applied (partial) |
 
-Each disbursement saves a separate `PaymentRecord` per bill. When total paid ≥ total amount on a bill, it automatically moves to `paid`.
+Each disbursement creates a separate `PaymentRecord` per bill. When paid ≥ total amount, bill moves to `paid` automatically.
 
 ### Customer Profile (Billing History)
 
-On the **Internet Accounts** page, click any username to open the Customer Profile. It shows:
-
+Internet Accounts → click any username. Shows:
 - Customer info: username, router, current package, monthly charge
 - Summary: total bills, total paid, total outstanding
-- Full billing history table with: Month, Bill #, Amount, Paid, Due, Status, Payment Method, Receipt #, Collected By, Payment Date
+- Full billing history: Month · Bill # · Amount · Paid · Due · Status · Payment Method · Receipt # · Collected By · Date
 
-### Dashboard — Financial Stats
+---
 
-The Dashboard shows real-time financial metrics. **Sections are shown only if the logged-in user has the relevant permission.** Data is automatically scoped to the user's account prefix (billing officers and operators see only their assigned customers).
+## Dashboard
 
-**Collections** (visible if `billing: view`):
+The Dashboard shows real-time financial metrics. **Each section is visible only if the logged-in user has the required permission.** All financial data is automatically scoped to the user's account prefix.
 
-| Card | Source |
-|------|--------|
+### Collections (requires `billing: view`)
+
+| Card | Shows |
+|------|-------|
 | Today's Collection | Payments received today |
-| This Month | Payments received this calendar month |
-| Last Month | Payments received last calendar month |
+| **Total Collected** | This calendar month's total (sub-text shows last month for comparison) |
 | Outstanding Due | Sum of `due_amount` on all unpaid/partial bills |
 
-**Expenses** (visible if `expenses: view`):
+### Expenses (requires `expenses: view`)
 
-| Card | Source |
-|------|--------|
+| Card | Shows |
+|------|-------|
 | Today's Expense | Expenses recorded today |
-| This Month | Expenses recorded this calendar month |
-| Last Month | Expenses recorded last calendar month |
-| Cash in Hand | This month collection − this month expense |
+| **Total Expense** | This calendar month's expenses (sub-text shows last month) |
+| Cash in Hand | This month's collection − this month's expense |
 
-> Billing officers who have `billing: view` but not `expenses: view` still see a **Cash in Hand** card showing their monthly net.
+> Billing officers without `expenses: view` still see a **Cash in Hand** card.
 
-**Charts** (visible if `billing: view` or `expenses: view`): 12-month Collection vs Expense vs Cash in Hand (line), expense by category pie (this month), monthly collection bar chart.
+### Other Dashboard Sections
 
-**Network / Routers** (visible if `routers: view`): Router online/offline counts, active PPPoE sessions, recent sync logs.
-
-**Internet Accounts** (visible if `accounts: view`): Total/online/offline/disabled account counts — scoped to the user's prefix.
-
-**Billing Stats** (visible if `billing: view`): Packages, subscriptions, bills generated, paid, pending.
-
-**Activity Timeline**: Visible to all dashboard users. Shows recent system activity.
+| Section | Required Permission |
+|---------|-------------------|
+| Charts (Collection vs Expense, Monthly bar) | `billing: view` or `expenses: view` |
+| Billing Stats (packages, subscriptions, bills) | `billing: view` |
+| Network / Routers | `routers: view` |
+| Recent Syncs | `routers: view` |
+| Internet Accounts | `accounts: view` |
+| Activity Timeline | `dashboard: view` (all users) |
 
 ---
 
 ## Collection Report
 
-**Reports → Collection Report** shows the full payment picture for any billing month.
+**Reports → Collection Report** — full payment picture for any billing month.
 
 **Default month:** Opens on the current running month.
 
-**Filters:**
-- Month / Year selector
-- Payment Status: All / Paid / Partial / Unpaid / No Bill
-- Additional filters panel: Router
+**Filters:** Month/Year · Payment Status (All/Paid/Partial/Unpaid/No Bill) · Router · Package · OLT · PON Port · Collector · Search
 
-**Summary cards:** Total Active, Collected, Uncollected, Collection Amount, Total Bill, Total Due, Collection Rate %.
+**Summary cards:** Total Active · Collected · Uncollected · Collection Amount · Total Bill · Total Due · Collection Rate %
 
 ### Staff Collection Cards
 
-The report shows a card for each billing officer who collected payments in the selected month. Each card displays:
-- Staff name and role
-- Total amount collected (৳)
-- Number of clients paid
-- Share of total collection (progress bar)
+A card per billing officer who collected payments in the selected month. Each shows: staff name, total collected (৳), client count, share of total collection (progress bar).
 
-**Admin view:** Click any staff card to filter the bill table below to only show bills collected by that person. A blue banner appears: *"Showing bills collected by [Name]"* with a clear button. Click the card again to deselect.
+- **Admin view:** Click any staff card to filter the table to bills collected by that person. Blue banner: *"Showing bills collected by [Name]"* with clear button.
+- **Billing Officer view:** Sees only their own card and their own bills. Report is automatically scoped to their prefix accounts.
 
-**Billing Officer view:** Sees only their own card and their own collected bills. Page title shows "My Collection — [Month]".
+### Active Filter Banner
 
-### Table
+When a collector filter is active, a blue banner shows above the search bar: *"Showing bills collected by [Name] — ✕ Clear"*.
+
+### Table & Export
 
 Columns: Username · Package · Bill · Paid · Due · Status · Last Payment · Collected By
 
-Click any row to open the **Customer Detail Drawer** showing account info, ONU/network details, current bill breakdown, and last payment date + collector.
+Click any row → **Customer Detail Drawer** (account info, ONU/network details, bill breakdown, last payment).
 
 **CSV Export** downloads all rows in the current filtered view.
 
@@ -175,11 +174,9 @@ Click any row to open the **Customer Detail Drawer** showing account info, ONU/n
 Expenses → **Add Expense**. Each expense records:
 - Date, category, amount, payment method
 - Vendor and reference number (optional)
-- Description / notes
+- Notes
 
-Expense categories are managed separately and can be activated/deactivated. The Dashboard expense pie chart shows spending by category for the current month.
-
-Activity is logged for every expense create/update/delete (visible in the Dashboard activity timeline).
+Expense categories are managed separately (activate/deactivate). The Dashboard expense pie chart shows spending by category for the current month. Activity is logged for every create/update/delete.
 
 ---
 
@@ -187,426 +184,220 @@ Activity is logged for every expense create/update/delete (visible in the Dashbo
 
 ### SNMP Profiles
 
-Before adding an OLT, create (or use the seeded) SNMP profile for its vendor. A profile stores:
-- **Vendor** and **Technology** (EPON / GPON)
-- **OID Map** — key/value pairs mapping standard attribute names (`onu_mac`, `onu_status`, `onu_rx_power`, `onu_tx_power`, `onu_distance`, `onu_serial`, `onu_model`) to the actual vendor OID strings
-- **`index_port_pos`** / **`index_onu_pos`** — which segment of the SNMP walk index suffix encodes the port number and ONU slot (0-based)
+Before adding an OLT, create (or use the seeded) SNMP profile for its vendor:
 
-Seeded profiles (created on first startup):
-
-| Profile | Vendor | Technology | Notes |
-|---------|--------|------------|-------|
-| BDCOM_EPON | BDCOM | EPON | |
-| VSOL_EPON | VSOL | EPON | Uses `1.3.6.1.4.1.37950.1.1.5.12.1.25.1.*` OID tree; power stored as absolute value |
-| CDATA_EPON | C-Data | EPON | |
-| HUAWEI_GPON | Huawei | GPON | |
-| ZTE_GPON | ZTE | GPON | |
-| RICHERLINK_EPON | Richerlink | EPON | Packed index encoding; string float power values |
-| RICHERLINK_EPON_V2 | Richerlink | EPON | Firmware V1.0.0.32715+; uses GETNEXT walk (no GETBULK support); no per-ONU optical power |
+| Profile | Vendor | Technology |
+|---------|--------|------------|
+| BDCOM_EPON | BDCOM | EPON |
+| VSOL_EPON | VSOL | EPON |
+| CDATA_EPON | C-Data | EPON |
+| HUAWEI_GPON | Huawei | GPON |
+| ZTE_GPON | ZTE | GPON |
+| RICHERLINK_EPON | Richerlink | EPON |
+| RICHERLINK_EPON_V2 | Richerlink | EPON (firmware V1.0.0.32715+) |
 
 **Special OID map keys:**
 
-| Key | Type | Purpose |
-|-----|------|---------|
-| `index_port_pos` | int string | Position in OID suffix that holds port number (default `"0"`) |
-| `index_onu_pos` | int string | Position in OID suffix that holds ONU slot (default `"1"`) |
-| `index_packed` | `"true"` | ONU index is a single encoded int: `port<<16 \| slot<<8 \| onu` (Richerlink) |
-| `status_online_string` | string | Match substring for string-based online status (e.g. `"configuration ok"`) |
-| `power_divisor` | float string | Divide raw power integer by this value to get dBm (default `"10"`) |
-| `rx_power_negate` | `"true"` | Negate RX power value — for OLTs that store it as an absolute positive |
-| `distance_unit` | `"m"` / `"cm"` | Distance unit from the OLT; `"cm"` values are auto-converted to metres |
-| `use_getnext` | `"true"` | Force GETNEXT walk instead of GETBULK — for firmware that doesn't respond to GETBULK |
-
-### Adding an OLT
-
-OLTs → **Add OLT**:
-- Management IP, vendor, model
-- Select SNMP profile
-- SNMP version: **v2c** (community string) or **v3** (username + auth/priv protocol + passwords)
-- Sync interval in minutes (`0` = manual only)
-
-v3 passwords are encrypted at rest using AES and masked in API responses.
+| Key | Purpose |
+|-----|---------|
+| `index_port_pos` | Position in OID suffix for port number (default `"0"`) |
+| `index_onu_pos` | Position in OID suffix for ONU slot (default `"1"`) |
+| `index_packed` | `"true"` — packed index encoding (Richerlink) |
+| `status_online_string` | Substring match for string-based online status |
+| `power_divisor` | Divide raw power int by this to get dBm (default `"10"`) |
+| `rx_power_negate` | `"true"` — negate RX power (VSOL absolute value) |
+| `distance_unit` | `"m"` or `"cm"` — auto-converts cm to metres |
+| `use_getnext` | `"true"` — force GETNEXT walk (no GETBULK support) |
 
 ### OLT Sync
 
-Sync walks the OIDs defined in the OLT's SNMP profile and:
-1. Discovers PON ports (created lazily on first ONU discovery for that port)
-2. Upserts each ONU by `(olt_id, port_index, onu_slot)` — the idempotent key
-3. Archives ONUs no longer visible (sets `archived_at`)
-4. Updates ONU counts on each PON port
-5. Logs a `OLTSyncLog` with counts: ports discovered, ONUs discovered/new/updated/archived
-
-**Background scheduler** checks every minute for OLTs whose `sync_interval > 0` and whose `last_sync_at` is older than `sync_interval` minutes, then runs sync automatically.
-
-Sync can also be triggered manually per-OLT from the OLTs page.
-
-### ONU Inventory
-
-The ONU Inventory page lists all ONUs with filters for OLT, port, status (online/offline), and unlinked-only. Select an OLT to reveal the port filter — pick a specific PON port to see only ONUs on that port. Click any row to open a detail sheet showing:
-
-- MAC address, serial number, vendor/model
-- Optical power (Rx/Tx dBm, color-coded: green ≥ −20, yellow −20 to −25, red < −25) and distance
-- Last online timestamp
-- Linked internet account (with change/unlink action)
-
-**Link ONU → Account**: from the detail sheet, click the link icon to open the Link dialog. Search for an internet account by username or IP, select it, and save. This associates the physical ONU (fiber modem) with the PPPoE customer record.
+Walks OIDs, discovers/upserts ONUs by `(olt_id, port_index, onu_slot)`, archives ONUs no longer visible, updates port counts, logs sync results. Background scheduler checks every minute for overdue syncs.
 
 ---
 
 ## PPPoE Sync
 
-Sync is idempotent — running it multiple times is safe.
+Idempotent — safe to run multiple times.
 
-**What happens on each sync:**
-1. Orphaned rows (nil router_id) are cleaned first
-2. Each PPPoE secret is upserted by `(router_id, username)` — the unique key
-3. Accounts in MikroTik but not in IBMS → created; accounts in IBMS but not in MikroTik → archived
-4. Active sessions are fetched; `is_online`, `current_ip`, `uptime` updated per account
-5. If an account's profile has a Package Mapping → subscription auto-assigned
+1. Orphaned rows cleaned first
+2. Secrets upserted by `(router_id, username)`
+3. MikroTik-only → created; IBMS-only → archived
+4. Sessions fetched → `is_online`, `current_ip`, `uptime` updated
+5. Profile mapping found → subscription auto-assigned
 
-**Sync Summary dialog** appears after "Sync All" showing: new, updated, archived account counts, online/offline users, and any router errors.
+---
+
+## Roles & Permissions
+
+### Built-in Roles
+
+| Role | Dashboard Sections | Access |
+|------|-------------------|--------|
+| `super_admin` | All | Full access to all modules |
+| `admin` | All | Full access; cannot delete roles |
+| `billing_officer` | Collections · Billing · Accounts · Cash in Hand · Activity | billing, profile_mappings, subscriptions, packages, notifications (view/create/update); accounts (view) |
+| `operator` | Network · Accounts · Activity · Recent Syncs | routers, pppoe, accounts, network (view/create/update) |
+| `viewer` | Sections matching granted permissions | View-only on assigned modules |
+
+Permissions are module + action pairs assigned via **Roles & Permissions** in the UI. Only `super_admin` can modify permission assignments.
+
+### Permission Modules
+
+| Module | Controls |
+|--------|---------|
+| `dashboard` | Dashboard page access |
+| `accounts` | Internet Accounts page |
+| `routers` | Routers page + sync |
+| `pppoe` | PPPoE Secrets + Active Sessions |
+| `packages` | Packages page |
+| `profile_mappings` | Profile Mappings page |
+| `subscriptions` | Subscriptions page |
+| `billing` | Bills page + payment collection |
+| `notifications` | Notifications |
+| `expenses` | Expenses + Expense Categories |
+| `reports` | Collection Report |
+| `network` | OLTs · ONU Inventory · SNMP Profiles |
+| `users` | Users management |
+| `roles` | Roles & Permissions |
+
+### Sidebar Visibility
+
+Every sidebar item is hidden automatically if the user lacks the required permission. Users see only pages they are allowed to access.
+
+### Account Prefix Filter
+
+Non-admin roles can be restricted to Internet Accounts whose username starts with specific prefixes.
+
+**How to configure:**
+1. Admin → Roles & Permissions → click the role card
+2. Scroll to **Account Prefix Filter**
+3. Type a prefix → press **Enter** (or click **Save Prefixes** directly)
+4. Add multiple prefixes — the role sees accounts matching any of them
+
+**Behaviour:**
+- Prefixes set (e.g. `SUN`, `AB`) → user sees only accounts starting with those prefixes
+- No prefixes set → user sees **no accounts** (fully blocked)
+- `admin` / `super_admin` → always unrestricted
+
+**Prefix filter is enforced system-wide:**
+- Internet Accounts page
+- Bills page
+- Collection Report
+- Dashboard (collections, outstanding due, bill counts, account stats all scoped to prefix accounts)
+
+**Example:**
+
+| User | Prefix | Sees |
+|------|--------|------|
+| Hanif (billing_officer) | `SUN` | SUN_001, SUN_Karim, … |
+| Sany (billing_officer) | `AB` | AB_Sany, AB_Rahman, … |
 
 ---
 
 ## Deploy to Ubuntu (Production)
 
-This section covers a full production deployment on Ubuntu 20.04 or 22.04 using Docker Compose and Nginx.
-
-### 1. Prepare the server
+### 1. Install Docker
 
 ```bash
-# Update packages
-sudo apt update && sudo apt upgrade -y
-
-# Install required tools
-sudo apt install -y git curl ufw
-```
-
-### 2. Install Docker & Docker Compose
-
-```bash
-# Install Docker
+sudo apt update && sudo apt install -y git curl
 curl -fsSL https://get.docker.com | sh
-
-# Add your user to the docker group (so you don't need sudo every time)
-sudo usermod -aG docker $USER
-
-# Apply group change (or log out and back in)
-newgrp docker
-
-# Verify Docker is running
-docker --version
-docker compose version
+sudo usermod -aG docker $USER && newgrp docker
 ```
 
-### 3. Configure firewall (UFW)
+### 2. Clone & Configure
 
 ```bash
-# Allow SSH (important — do this before enabling UFW)
-sudo ufw allow OpenSSH
-
-# Allow HTTP and HTTPS (for Nginx)
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-
-# Enable firewall
-sudo ufw enable
-
-# Verify
-sudo ufw status
-```
-
-> **Note:** Do NOT expose port 5869 (frontend) directly in production — Nginx handles all incoming traffic. Port 8082 (backend) is accessible on the host for direct API access and debugging, but all browser traffic should go through Nginx.
-
-### 4. Clone the project
-
-```bash
-# Choose your deploy directory
-cd /opt
-sudo git clone https://github.com/your-org/ispcms.git
-sudo chown -R $USER:$USER ispcms
+cd ~
+git clone https://github.com/your-org/ispcms.git
 cd ispcms
-```
-
-Or transfer from your machine:
-
-```bash
-# From your local machine
-scp -r ./ispcms user@your-server-ip:/opt/ispcms
-```
-
-### 5. Configure environment variables
-
-```bash
 cp .env.example .env
-nano .env
+nano .env   # set DB_PASSWORD, JWT_SECRET, SUPER_ADMIN_PASSWORD, CORS_ORIGINS
 ```
 
-Edit every value — especially these:
-
-```env
-# Database — use a strong password
-DB_NAME=ispcms
-DB_USER=ispcms
-DB_PASSWORD=CHANGE_THIS_STRONG_PASSWORD
-
-# JWT secret — minimum 32 characters, random
-JWT_SECRET=CHANGE_THIS_TO_A_RANDOM_SECRET_MIN_32_CHARS
-
-# Server
-SERVER_ENV=production
-CORS_ORIGINS=https://your-domain.com
-
-# Initial super admin account
-SUPER_ADMIN_EMAIL=admin@your-domain.com
-SUPER_ADMIN_PASSWORD=CHANGE_THIS_STRONG_PASSWORD
-SUPER_ADMIN_USERNAME=superadmin
-```
-
-> **Security:** Never commit `.env` to git. The `.gitignore` already excludes it.
-
-### 6. Build and start
+### 3. Build & Start
 
 ```bash
-cd /opt/ispcms
 docker compose up -d --build
+docker compose ps   # all three containers should be Up
 ```
 
-This will:
-- Build the Go backend image
-- Build the Next.js frontend image
-- Start PostgreSQL, backend, and frontend containers
-- Run database migrations and seed default data automatically on first start
-
-Verify all containers are running:
-
-```bash
-docker compose ps
-```
-
-You should see three containers — `ispcms_db`, `ispcms_backend`, `ispcms_frontend` — all with status `Up`.
-
-Check logs if anything looks wrong:
-
-```bash
-docker compose logs -f backend
-docker compose logs -f frontend
-```
-
-### 7. Install and configure Nginx
+### 4. Nginx (IP-only access)
 
 ```bash
 sudo apt install -y nginx
-```
-
-Create the site configuration:
-
-```bash
 sudo nano /etc/nginx/sites-available/ispcms
 ```
 
-Paste the following (replace `your-domain.com` with your actual domain or server IP):
-
 ```nginx
 server {
     listen 80;
-    server_name your-domain.com;
-
-    # Increase timeouts for long-running SNMP sync operations
+    server_name _;
     proxy_read_timeout 180s;
-    proxy_connect_timeout 10s;
-    proxy_send_timeout 30s;
 
-    # Frontend
     location / {
         proxy_pass http://127.0.0.1:5869;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
     }
 
-    # Backend API — direct pass-through
     location /api/ {
         proxy_pass http://127.0.0.1:8082;
-        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 180s;
     }
 }
 ```
-
-Enable the site and restart Nginx:
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/ispcms /etc/nginx/sites-enabled/
-sudo nginx -t          # test config — must say "syntax is ok"
-sudo systemctl restart nginx
-sudo systemctl enable nginx
+sudo nginx -t && sudo systemctl restart nginx && sudo systemctl enable nginx
 ```
 
-The app is now accessible at `http://your-domain.com`.
-
-### 8. Enable HTTPS with Let's Encrypt (recommended)
-
-> Requires a real domain name pointing to your server's IP.
+### 5. Update to a New Version
 
 ```bash
-sudo apt install -y certbot python3-certbot-nginx
-
-sudo certbot --nginx -d your-domain.com
-
-# Auto-renewal is set up automatically. Test it:
-sudo certbot renew --dry-run
-```
-
-Certbot will update the Nginx config to redirect HTTP → HTTPS and add the SSL certificate. After this, also update your `.env`:
-
-```env
-CORS_ORIGINS=https://your-domain.com
-```
-
-Then restart the backend:
-
-```bash
-docker compose restart backend
-```
-
-### 9. (Optional) Run without a domain — IP only
-
-If you don't have a domain and want to access via IP directly, use this simplified Nginx config:
-
-```nginx
-server {
-    listen 80;
-    server_name _;        # matches any hostname / bare IP
-
-    proxy_read_timeout 180s;
-
-    location / {
-        proxy_pass http://127.0.0.1:5869;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:8082;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_read_timeout 180s;
-    }
-}
-```
-
-Access the app at `http://<server-ip>`.
-
----
-
-## Managing the Deployment
-
-### Update to a new version
-
-```bash
-cd /opt/ispcms
-
-# Pull latest code
+cd ~/ispcms
+git stash          # discard local server changes if any
 git pull
-
-# Rebuild and restart (zero-downtime: Compose restarts containers one by one)
-docker compose up -d --build
+docker compose build --no-cache
+docker compose up -d
 ```
 
-### View logs
+### Useful Commands
 
 ```bash
-# All services
-docker compose logs -f
-
-# Specific service
+# Logs
 docker compose logs -f backend
 docker compose logs -f frontend
-docker compose logs -f postgres
-```
 
-### Restart services
-
-```bash
-# Restart everything
-docker compose restart
-
-# Restart one service
+# Restart
 docker compose restart backend
-```
 
-### Stop and start
-
-```bash
-docker compose down       # stop all containers (data is preserved in volumes)
-docker compose up -d      # start again
-```
-
-### Backup the database
-
-```bash
-# Create a backup
-docker exec ispcms_db pg_dump -U ispcms ispcms > backup_$(date +%Y%m%d_%H%M%S).sql
-
-# Restore from backup
-docker exec -i ispcms_db psql -U ispcms ispcms < backup_20260101_120000.sql
-```
-
-### Check container status
-
-```bash
-docker compose ps
-docker stats --no-stream    # CPU / memory usage
+# Database backup
+docker exec ispcms_db pg_dump -U ispcms ispcms > backup_$(date +%Y%m%d).sql
 ```
 
 ---
 
 ## Development
 
-### Prerequisites
-- Docker & Docker Compose
-- Go 1.22 (for local backend work)
-- Node.js 20+ (for local frontend work)
-
-### Run locally
-
 ```bash
 cp .env.example .env
-# Edit .env if needed, then:
 docker compose up -d
 ```
 
 - Backend API: `http://localhost:8082/api/v1`
 - Frontend: `http://localhost:5869`
 
-Default login credentials are set via `SUPER_ADMIN_USERNAME` / `SUPER_ADMIN_PASSWORD` in `.env`.
-
-### Rebuild a single service after code changes
+Rebuild a single service after code changes:
 
 ```bash
+docker compose build --no-cache backend && docker compose up -d backend
 docker compose build --no-cache frontend && docker compose up -d frontend
-docker compose build --no-cache backend  && docker compose up -d backend
 ```
 
-### Database schema
-
-Schema is auto-migrated on startup via GORM `AutoMigrate`. No manual SQL migrations needed.
-
-`PrepareSchema` runs before AutoMigrate on every startup to:
-- Remove orphaned internet_account rows (old sync bug cleanup)
-- Deduplicate rows by `(router_id, username)` if any exist
-- Drop old indexes before recreating them
-- Remove phantom router rows (created by an old save-cascade bug — now fixed)
+Schema is auto-migrated via GORM `AutoMigrate` on every startup — no manual SQL needed.
 
 ---
 
@@ -614,10 +405,10 @@ Schema is auto-migrated on startup via GORM `AutoMigrate`. No manual SQL migrati
 
 ```
 backend/
-  cmd/main.go                    Entry point; starts OLT sync scheduler
+  cmd/server/                    Entry point; starts OLT sync scheduler
   internal/
     config/                      Env config
-    database/                    DB connect + PrepareSchema + migrate + seed
+    database/                    DB connect, PrepareSchema, migrate, seed
     handlers/                    HTTP handlers (one file per module)
     middleware/                  JWT auth, RBAC permission checks
     models/                      GORM models
@@ -631,91 +422,27 @@ frontend/
   src/
     app/(dashboard)/             Page routes (Next.js App Router)
     components/
-      layout/                    Sidebar, Topbar
+      layout/                    Sidebar (permission-filtered), Topbar
+      roles/                     PermissionMatrix, AccountPrefixEditor
       ui/                        shadcn/ui components
-    lib/
-      api.ts                     Axios API client (all endpoints)
-      utils.ts                   Date formatting, cn()
+    contexts/AuthContext.tsx     Auth state + hasPermission() + hasRole()
+    lib/api.ts                   Axios API client (all endpoints)
     types/index.ts               TypeScript interfaces for all models
 ```
 
 ---
 
-## API Endpoints (key ones)
+## Key API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/dashboard/stats` | All stats including financial + activity timeline |
-| `GET` | `/dashboard/activities` | Activity log with module + period filters |
-| `GET` | `/internet-accounts/:id/billing-history` | Bills + last payment info for a customer |
-| `GET` | `/bills/account-due?internet_account_id=` | Total outstanding + list of unpaid bills for a customer |
-| `POST` | `/bills/collect` | Collect payment across all unpaid bills oldest-first (carry-forward) |
-| `PATCH` | `/bills/:id/status` | Update a single bill's status / paid amount directly |
-| `POST` | `/internet-accounts/sync-all` | Sync all routers, returns SyncSummary |
-| `GET` | `/snmp-profiles` | List SNMP vendor profiles |
-| `POST` | `/olts` | Add OLT device |
-| `POST` | `/olts/:id/sync` | Trigger manual OLT sync |
-| `POST` | `/olts/:id/test` | Test SNMP connectivity |
-| `GET` | `/olts/:id/pon-ports` | List PON ports for an OLT |
-| `GET` | `/onus` | List ONUs (filterable by OLT, port, status, unlinked) |
-| `PATCH` | `/onus/:id/link` | Link ONU to an internet account |
-| `GET` | `/expenses` | List expenses with filters |
-| `GET` | `/expenses/summary` | Expense totals by period and category |
-| `GET` | `/reports/active-user-collection` | Collection report: rows, summary, per-collector, per-package, daily chart. Params: `billing_month`, `billing_year`, `payment_status`, `package_id`, `router_id`, `olt_id`, `pon_port_id`, `collector_id`, `search`, `page`, `page_size` |
+| `GET` | `/dashboard/stats` | Financial stats + activity — prefix-scoped per user |
+| `GET` | `/reports/active-user-collection` | Collection report — prefix-scoped per user |
+| `GET` | `/bills/account-due?internet_account_id=` | All outstanding bills for a customer |
+| `POST` | `/bills/collect` | Collect payment across all unpaid bills oldest-first |
+| `GET` | `/internet-accounts` | Account list — prefix-scoped |
+| `GET` | `/bills` | Bill list — prefix-scoped |
 | `PUT` | `/roles/:id/account-prefixes` | Set account prefix filter for a role |
-
----
-
-## Roles & Permissions
-
-| Role | Dashboard Sections Visible | Access |
-|------|---------------------------|--------|
-| `super_admin` | Everything | Full access to all modules |
-| `admin` | Everything | Full access; cannot delete roles |
-| `billing_officer` | Collections · Billing Stats · Accounts · Cash in Hand · Activity | billing, packages, subscriptions, reports (view/create/update); accounts (view); dashboard (view). Prefix-scoped. |
-| `service_technician` | Network · Accounts · Activity · Recent Syncs | routers, PPPoE, accounts, network/OLT/ONU (view/create/update); dashboard (view). Prefix-scoped. |
-| `operator` | Network · Accounts · Activity · Recent Syncs | routers, PPPoE, accounts, network (view/create/update); dashboard (view) |
-| `viewer` | Sections matching their granted permissions | View-only across assigned modules |
-
-Permissions are module + action pairs (`accounts.view`, `billing.update`, etc.) assigned via **Roles & Permissions** in the UI. Only `super_admin` can modify role permission assignments.
-
-**Dashboard section visibility rules:**
-
-| Section | Required permission |
-|---------|-------------------|
-| Collections | `billing: view` |
-| Expenses | `expenses: view` |
-| Cash in Hand | `billing: view` (shown even without expenses permission) |
-| Billing Stats | `billing: view` |
-| Network / Routers | `routers: view` |
-| Recent Syncs | `routers: view` |
-| Internet Accounts | `accounts: view` |
-| Activity Timeline | `dashboard: view` (all users) |
-
-### Account Prefix Filter
-
-Non-admin roles (billing_officer, operator, viewer) can be restricted to only see Internet Accounts whose username starts with specific prefixes.
-
-**How to configure:**
-1. Admin → Roles & Permissions → click the role card to expand it
-2. Scroll to **Account Prefix Filter** at the bottom
-3. Type a prefix and press **Enter** (or just click **Save Prefixes** directly)
-4. Add multiple prefixes if needed — the role will see accounts matching any of them
-
-**Behaviour:**
-- **Prefixes set** (e.g. `AB`, `XY`) → user sees only accounts starting with `AB` or `XY`
-- **No prefixes set** → user sees **no accounts** (fully blocked)
-- **admin / super_admin** → always unrestricted; prefix filter is ignored
-
-**Example — two billing officers, each managing a different area:**
-
-| Role assignment | Prefix | Sees |
-|-----------------|--------|------|
-| Hanif (billing_officer) | `AB` | AB-Hanif, AB-Karim, … |
-| Sany (billing_officer) | `XY` | XY-Sany, XY-Rahman, … |
-
-The prefix filter is enforced system-wide — it applies to:
-- **Internet Accounts** page
-- **Bills** page
-- **Collection Report** — billing officer sees only their own accounts' bills
-- **Dashboard** — collections, outstanding due, bill counts, and account stats are all scoped to the user's prefix accounts
+| `PUT` | `/roles/:id/permissions` | Set all permissions for a role |
+| `POST` | `/olts/:id/sync` | Trigger manual OLT sync |
+| `PATCH` | `/onus/:id/link` | Link ONU to an internet account |
