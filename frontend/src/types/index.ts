@@ -353,6 +353,9 @@ export interface DashboardStats {
   // Activity
   recent_sync_logs: SyncLog[];
   recent_activities: ActivityLog[];
+  // Visiting
+  today_visits_count: number;
+  today_visits: Visit[];
 }
 
 // ─── Expense Module ───────────────────────────────────────────────────────────
@@ -603,4 +606,49 @@ export interface CollectionReportData {
   total_pages: number;
   billing_month: number;
   billing_year: number;
+}
+
+// ─── Visiting Module ──────────────────────────────────────────────────────────
+
+export interface Visit {
+  id: string;
+  internet_account_id: string;
+  bill_id: string;
+  billing_month: number;
+  billing_year: number;
+  assigned_staff_id: string;
+  scheduled_date: string;
+  scheduled_time: string;
+  status: "Scheduled" | "Completed" | "Rescheduled" | "Cancelled";
+  notes?: string;
+  created_by: string;
+  updated_by?: string;
+  completed_by?: string;
+  completed_at?: string;
+  rescheduled_by?: string;
+  rescheduled_at?: string;
+  created_at: string;
+  updated_at: string;
+  internet_account?: InternetAccount;
+  bill?: MonthlyBill;
+  assigned_staff?: User;
+}
+
+export interface PendingVisitCustomer {
+  internet_account_id: string;
+  username: string;
+  comment?: string;
+  package_name: string;
+  bill_id: string;
+  billing_month: number;
+  billing_year: number;
+  total_amount: number;
+  paid_amount: number;
+  due_amount: number;
+  bill_status: string;
+  existing_visit_id?: string;
+  scheduled_date?: string;
+  scheduled_time?: string;
+  assigned_staff_name?: string;
+  visit_status?: string;
 }

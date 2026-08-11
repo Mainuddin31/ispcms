@@ -113,6 +113,15 @@ func PrepareSchema(db *gorm.DB) {
 		`)
 		log.Println("PrepareSchema: cleaned phantom routers and cascade-created dependents")
 	}
+
+	// Drop phantom FK constraints that GORM added to the users table when
+	// it incorrectly resolved Visit.Creator/Completer associations before the
+	// visits table existed. These constraints are invalid and must be removed
+	// so AutoMigrate can proceed cleanly.
+	db.Exec(`ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "fk_visits_creator"`)
+	db.Exec(`ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "fk_visits_completer"`)
+	db.Exec(`ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "fk_visits_updated_by"`)
+	db.Exec(`ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "fk_visits_rescheduled_by"`)
 }
 
 func Migrate(db *gorm.DB) error {
@@ -146,6 +155,8 @@ func Migrate(db *gorm.DB) error {
 		&models.PONPort{},
 		&models.ONU{},
 		&models.OLTSyncLog{},
+		// Visiting module
+		&models.Visit{},
 	)
 }
 
@@ -168,7 +179,7 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 	// accounts  = internet account management (/internet-accounts)
 	// pppoe     = raw PPPoE data from routers (/pppoe/secrets, /pppoe/sessions)
 	// network   = OLTs, PON ports, ONUs, SNMP profiles
-	modules := []string{"users", "roles", "routers", "pppoe", "accounts", "dashboard", "billing", "packages", "profile_mappings", "subscriptions", "notifications", "expenses", "network", "reports"}
+	modules := []string{"users", "roles", "routers", "pppoe", "accounts", "dashboard", "billing", "packages", "profile_mappings", "subscriptions", "notifications", "expenses", "network", "reports", "visiting"}
 	actions := []string{"view", "create", "update", "delete"}
 	for _, mod := range modules {
 		for _, action := range actions {
@@ -291,6 +302,22 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 	for _, p := range allPerms {
 		if p.Module == "expenses" && (p.Action == "view" || p.Action == "create" || p.Action == "update") {
 			rp := models.RolePermission{RoleID: billingOfficerRole.ID, PermissionID: p.ID}
+			db.FirstOrCreate(&rp, rp)
+		}
+	}
+
+	// Billing officer gets full visiting access (view/create/update/complete/reschedule/cancel)
+	for _, p := range allPerms {
+		if p.Module == "visiting" {
+			rp := models.RolePermission{RoleID: billingOfficerRole.ID, PermissionID: p.ID}
+			db.FirstOrCreate(&rp, rp)
+		}
+	}
+
+	// Operator gets visiting view + create + update + complete + reschedule
+	for _, p := range allPerms {
+		if p.Module == "visiting" && (p.Action == "view" || p.Action == "create" || p.Action == "update") {
+			rp := models.RolePermission{RoleID: operatorRole.ID, PermissionID: p.ID}
 			db.FirstOrCreate(&rp, rp)
 		}
 	}

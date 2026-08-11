@@ -66,7 +66,7 @@ export const dashboardApi = {
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 export const usersApi = {
-  list: (params?: { page?: number; page_size?: number; search?: string }) =>
+  list: (params?: { page?: number; page_size?: number; search?: string; status?: string }) =>
     api.get("/users", { params }),
   get: (id: string) => api.get(`/users/${id}`),
   create: (data: object) => api.post("/users", data),
@@ -327,6 +327,50 @@ export const reportsApi = {
     page?: number;
     page_size?: number;
   }) => api.get("/reports/active-user-collection", { params }),
+};
+
+// ─── Visiting ────────────────────────────────────────────────────────────────
+export const visitingApi = {
+  pendingCustomers: (params?: { month?: number; year?: number }) =>
+    api.get("/visits/pending-customers", { params }),
+  today: () => api.get("/visits/today"),
+  list: (params?: {
+    page?: number;
+    page_size?: number;
+    status?: string;
+    date_from?: string;
+    date_to?: string;
+    date_preset?: "today" | "tomorrow" | "this_week";
+    assigned_staff_id?: string;
+    search?: string;
+  }) => api.get("/visits", { params }),
+  get: (id: string) => api.get(`/visits/${id}`),
+  create: (data: {
+    internet_account_id: string;
+    bill_id: string;
+    billing_month: number;
+    billing_year: number;
+    assigned_staff_id: string;
+    scheduled_date: string;
+    scheduled_time: string;
+    notes?: string;
+  }) => api.post("/visits", data),
+  update: (id: string, data: {
+    scheduled_date?: string;
+    scheduled_time?: string;
+    assigned_staff_id?: string;
+    notes?: string;
+  }) => api.put(`/visits/${id}`, data),
+  complete: (id: string) => api.post(`/visits/${id}/complete`, {}),
+  reschedule: (id: string, data: {
+    scheduled_date: string;
+    scheduled_time: string;
+    assigned_staff_id?: string;
+    notes?: string;
+  }) => api.post(`/visits/${id}/reschedule`, data),
+  cancel: (id: string) => api.post(`/visits/${id}/cancel`, {}),
+  byAccount: (internetAccountId: string) =>
+    api.get(`/internet-accounts/${internetAccountId}/visits`),
 };
 
 // ─── PPPoE ────────────────────────────────────────────────────────────────────

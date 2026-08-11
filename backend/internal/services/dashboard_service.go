@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/ispcms/backend/internal/models"
 	"github.com/ispcms/backend/internal/repositories"
 	"gorm.io/gorm"
@@ -71,10 +72,14 @@ type DashboardStats struct {
 
 	RecentSyncLogs   []models.SyncLog     `json:"recent_sync_logs"`
 	RecentActivities []models.ActivityLog `json:"recent_activities"`
+
+	// Visiting
+	TodayVisitsCount int64          `json:"today_visits_count"`
+	TodayVisits      []models.Visit `json:"today_visits"`
 }
 
 type DashboardService interface {
-	GetStats(prefixes []string, prefixRestricted bool) (*DashboardStats, error)
+	GetStats(prefixes []string, prefixRestricted bool, staffID *string) (*DashboardStats, error)
 }
 
 type dashboardService struct {
@@ -87,6 +92,7 @@ type dashboardService struct {
 	billRepo            repositories.BillRepository
 	expenseRepo         repositories.ExpenseRepository
 	activityRepo        repositories.ActivityLogRepository
+	visitRepo           repositories.VisitRepository
 	db                  *gorm.DB
 }
 
@@ -100,6 +106,7 @@ func NewDashboardService(
 	billRepo repositories.BillRepository,
 	expenseRepo repositories.ExpenseRepository,
 	activityRepo repositories.ActivityLogRepository,
+	visitRepo repositories.VisitRepository,
 	db *gorm.DB,
 ) DashboardService {
 	return &dashboardService{
@@ -112,13 +119,14 @@ func NewDashboardService(
 		billRepo:            billRepo,
 		expenseRepo:         expenseRepo,
 		activityRepo:        activityRepo,
+		visitRepo:           visitRepo,
 		db:                  db,
 	}
 }
 
 var monthNames = []string{"", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 
-func (s *dashboardService) GetStats(prefixes []string, prefixRestricted bool) (*DashboardStats, error) {
+func (s *dashboardService) GetStats(prefixes []string, prefixRestricted bool, staffID *string) (*DashboardStats, error) {
 	stats := &DashboardStats{}
 
 	// Non-prefix-filtered stats (infrastructure / router / PPPoE)
@@ -255,6 +263,19 @@ func (s *dashboardService) GetStats(prefixes []string, prefixRestricted bool) (*
 		stats.TotalExpense, _ = s.expenseRepo.Summary(nil, nil, nil)
 		// Expense category breakdown for pie chart (this month)
 		stats.ExpenseCategoryPie, _ = s.expenseRepo.CategoryTotals(&monthStart, nil)
+	}
+
+	// ── Today's visits ───────────────────────────────────────────────────────
+	if s.visitRepo != nil {
+		var visitStaffID *uuid.UUID
+		if staffID != nil {
+			if uid, err := uuid.Parse(*staffID); err == nil {
+				visitStaffID = &uid
+			}
+		}
+		todayVisits, _ := s.visitRepo.TodayVisits(visitStaffID)
+		stats.TodayVisits = todayVisits
+		stats.TodayVisitsCount = int64(len(todayVisits))
 	}
 
 	// ── Cash in hand (always calculated, never stored) ────────────────────────

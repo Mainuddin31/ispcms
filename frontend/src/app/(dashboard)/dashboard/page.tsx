@@ -30,6 +30,8 @@ import {
   BarChart2,
   RefreshCcw,
   Tag,
+  CalendarClock,
+  ChevronRight,
 } from "lucide-react";
 import {
   LineChart,
@@ -47,7 +49,8 @@ import {
   Bar,
 } from "recharts";
 import { dashboardApi } from "@/lib/api";
-import { DashboardStats, ActivityLog } from "@/types";
+import { DashboardStats, ActivityLog, Visit } from "@/types";
+import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { Topbar } from "@/components/layout/Topbar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -123,6 +126,7 @@ function activityMeta(a: ActivityLog) {
   if (type === "sync_completed") return { Icon: RefreshCcw, color: "text-teal-500", bg: "bg-teal-100 dark:bg-teal-900/30" };
   if (mod === "billing") return { Icon: CreditCard, color: "text-blue-500", bg: "bg-blue-100 dark:bg-blue-900/30" };
   if (mod === "expenses") return { Icon: Receipt, color: "text-orange-500", bg: "bg-orange-100 dark:bg-orange-900/30" };
+  if (mod === "visiting") return { Icon: CalendarClock, color: "text-blue-600", bg: "bg-blue-100 dark:bg-blue-900/30" };
   if (mod === "sync") return { Icon: RefreshCcw, color: "text-teal-500", bg: "bg-teal-100 dark:bg-teal-900/30" };
   return { Icon: Activity, color: "text-slate-500", bg: "bg-slate-100 dark:bg-slate-800" };
 }
@@ -140,6 +144,7 @@ export default function DashboardPage() {
   const canRouters  = hasPermission("routers",  "view");
   const canAccounts = hasPermission("accounts", "view");
   const canReports  = hasPermission("reports",  "view");
+  const canVisiting = hasPermission("visiting", "view");
 
   const { data, isLoading, refetch, isFetching } = useQuery<{ data: { data: DashboardStats } }>({
     queryKey: ["dashboard-stats"],
@@ -200,6 +205,100 @@ export default function DashboardPage() {
                 <StatCard title="Outstanding Due" value={fmt(stats?.total_outstanding_due ?? 0)} icon={AlertTriangle} color={(stats?.total_outstanding_due ?? 0) > 0 ? "bg-red-500" : "bg-slate-400"} />
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Today's Visits ────────────────────────────────────────────────── */}
+        {canVisiting && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Today&apos;s Visits</p>
+              <Link href="/visiting/schedule?date_preset=today" className="text-xs text-blue-500 hover:text-blue-400 font-medium flex items-center gap-0.5">
+                View All <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+            <Card>
+              <CardContent className="p-4">
+                {isLoading ? (
+                  <div className="space-y-2">
+                    {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+                  </div>
+                ) : !stats?.today_visits?.length ? (
+                  <div className="flex items-center gap-3 py-3 text-muted-foreground">
+                    <CalendarClock className="w-5 h-5 shrink-0" />
+                    <p className="text-sm">No visits scheduled for today</p>
+                  </div>
+                ) : (() => {
+                  const visits = stats.today_visits as Visit[];
+                  // Group by staff
+                  const byStaff = visits.reduce<Record<string, { name: string; visits: Visit[] }>>((acc, v) => {
+                    const sid = v.assigned_staff_id ?? "unassigned";
+                    const name = v.assigned_staff?.full_name ?? "Unassigned";
+                    if (!acc[sid]) acc[sid] = { name, visits: [] };
+                    acc[sid].visits.push(v);
+                    return acc;
+                  }, {});
+                  return (
+                    <div className="space-y-3">
+                      {/* Summary row */}
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
+                          <CalendarClock className="w-4 h-4 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-2xl font-bold leading-none">{stats.today_visits_count}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {Object.keys(byStaff).length} staff · scheduled today
+                          </p>
+                        </div>
+                      </div>
+                      {/* Per-staff groups */}
+                      <div className="space-y-3">
+                        {Object.entries(byStaff).map(([sid, group]) => (
+                          <div key={sid} className="rounded-lg border border-slate-100 bg-slate-50/50 overflow-hidden">
+                            {/* Staff header */}
+                            <div className="flex items-center justify-between px-3 py-2 bg-slate-100/70 border-b border-slate-100">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
+                                  {group.name.charAt(0).toUpperCase()}
+                                </div>
+                                <p className="text-sm font-semibold text-slate-700">{group.name}</p>
+                              </div>
+                              <Badge variant="secondary" className="text-xs">
+                                {group.visits.length} visit{group.visits.length !== 1 ? "s" : ""}
+                              </Badge>
+                            </div>
+                            {/* Visits under this staff */}
+                            <div className="divide-y divide-slate-100">
+                              {group.visits.map((v) => (
+                                <div key={v.id} className="flex items-center justify-between px-3 py-2">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium text-slate-800 truncate">
+                                      {v.internet_account?.username ?? "—"}
+                                    </p>
+                                    {v.bill?.package?.package_name && (
+                                      <p className="text-xs text-muted-foreground truncate">{v.bill.package.package_name}</p>
+                                    )}
+                                  </div>
+                                  <div className="text-right shrink-0 ml-3">
+                                    <p className="text-sm font-semibold text-blue-600">{v.scheduled_time}</p>
+                                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                                      v.status === "Scheduled" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"
+                                    }`}>
+                                      {v.status}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
           </div>
         )}
 
@@ -403,6 +502,7 @@ export default function DashboardPage() {
                     <option value="">All modules</option>
                     <option value="billing">Billing</option>
                     <option value="expenses">Expenses</option>
+                    <option value="visiting">Visiting</option>
                     <option value="sync">Sync</option>
                   </select>
                 </div>

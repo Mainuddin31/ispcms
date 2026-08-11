@@ -29,7 +29,15 @@ func (h *DashboardHandler) Stats(c *fiber.Ctx) error {
 		}
 	}
 
-	stats, err := h.dashboardSvc.GetStats(prefixes, prefixRestricted)
+	// Pass the current user's ID so visiting stats are correctly scoped
+	// (admins see all today's visits; staff see only their own).
+	var staffIDStr *string
+	if userID, ok := middleware.GetCurrentUserID(c); ok {
+		s := userID.String()
+		staffIDStr = &s
+	}
+
+	stats, err := h.dashboardSvc.GetStats(prefixes, prefixRestricted, staffIDStr)
 	if err != nil {
 		return utils.InternalError(c, err)
 	}

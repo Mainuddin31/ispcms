@@ -22,6 +22,7 @@ import {
   Server,
   Radio,
   BarChart2,
+  CalendarClock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -50,6 +51,8 @@ const navItems: NavItem[] = [
   { href: "/subscriptions",     label: "Subscriptions",      icon: CreditCard,      module: "subscriptions",    action: "view" },
   { href: "/bills",             label: "Bills",              icon: FileText,        module: "billing",          action: "view" },
   { href: "/notifications",     label: "Notifications",      icon: Bell,            module: "notifications",    action: "view" },
+  // Visiting
+  { href: "/visiting",          label: "Visiting",           icon: CalendarClock,   module: "visiting",         action: "view", divider: true },
   // Expenses
   { href: "/expenses",          label: "Expenses",           icon: Receipt,         module: "expenses",         action: "view", divider: true },
   { href: "/expense-categories",label: "Expense Categories", icon: Tag,             module: "expenses",         action: "view" },
