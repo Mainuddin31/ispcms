@@ -29,12 +29,14 @@ func (h *DashboardHandler) Stats(c *fiber.Ctx) error {
 		}
 	}
 
-	// Pass the current user's ID so visiting stats are correctly scoped
-	// (admins see all today's visits; staff see only their own).
+	// Scope visiting stats: super admins see ALL today's visits; regular staff see only their own.
 	var staffIDStr *string
 	if userID, ok := middleware.GetCurrentUserID(c); ok {
-		s := userID.String()
-		staffIDStr = &s
+		_, isSuperAdmin, _ := h.roleRepo.GetUserAccountPrefixes(userID)
+		if !isSuperAdmin {
+			s := userID.String()
+			staffIDStr = &s
+		}
 	}
 
 	stats, err := h.dashboardSvc.GetStats(prefixes, prefixRestricted, staffIDStr)
