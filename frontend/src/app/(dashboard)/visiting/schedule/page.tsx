@@ -139,7 +139,7 @@ function RescheduleDialog({ visit, onClose, onDone }: { visit: Visit; onClose: (
         </DialogHeader>
         <div className="py-2 space-y-4">
           <p className="text-sm text-muted-foreground">
-            Current: <span className="font-medium text-foreground">{visit.scheduled_date} at {visit.scheduled_time}</span>
+            Current: <span className="font-medium text-foreground">{visit.scheduled_date.split("T")[0]} at {visit.scheduled_time}</span>
           </p>
           <div className="space-y-1.5">
             <Label>New Date <span className="text-red-500">*</span></Label>
@@ -200,7 +200,7 @@ function CancelDialog({ visit, onClose, onDone }: { visit: Visit; onClose: () =>
         <DialogHeader><DialogTitle>Cancel Visit?</DialogTitle></DialogHeader>
         <p className="text-sm text-muted-foreground py-3">
           Cancel visit for <span className="font-semibold text-foreground">{visit.internet_account?.username}</span> scheduled on{" "}
-          {visit.scheduled_date} at {visit.scheduled_time}?
+          {visit.scheduled_date.split("T")[0]} at {visit.scheduled_time}?
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={loading}>Back</Button>

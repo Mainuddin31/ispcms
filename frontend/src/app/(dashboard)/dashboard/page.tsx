@@ -255,25 +255,25 @@ export default function DashboardPage() {
                       {/* Per-staff groups */}
                       <div className="space-y-3">
                         {Object.entries(byStaff).map(([sid, group]) => (
-                          <div key={sid} className="rounded-lg border border-slate-100 bg-slate-50/50 overflow-hidden">
+                          <div key={sid} className="rounded-lg border border-border bg-muted/30 overflow-hidden">
                             {/* Staff header */}
-                            <div className="flex items-center justify-between px-3 py-2 bg-slate-100/70 border-b border-slate-100">
+                            <div className="flex items-center justify-between px-3 py-2 bg-muted/60 border-b border-border">
                               <div className="flex items-center gap-2">
                                 <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
                                   {group.name.charAt(0).toUpperCase()}
                                 </div>
-                                <p className="text-sm font-semibold text-slate-700">{group.name}</p>
+                                <p className="text-sm font-semibold text-foreground">{group.name}</p>
                               </div>
                               <Badge variant="secondary" className="text-xs">
                                 {group.visits.length} visit{group.visits.length !== 1 ? "s" : ""}
                               </Badge>
                             </div>
                             {/* Visits under this staff */}
-                            <div className="divide-y divide-slate-100">
+                            <div className="divide-y divide-border">
                               {group.visits.map((v) => (
                                 <div key={v.id} className="flex items-center justify-between px-3 py-2">
                                   <div className="min-w-0">
-                                    <p className="text-sm font-medium text-slate-800 truncate">
+                                    <p className="text-sm font-medium text-foreground truncate">
                                       {v.internet_account?.username ?? "—"}
                                     </p>
                                     {v.bill?.package?.package_name && (

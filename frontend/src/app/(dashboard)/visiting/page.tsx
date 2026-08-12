@@ -54,8 +54,8 @@ interface ScheduleDialogProps {
 
 function ScheduleDialog({ customer, onClose, onSaved }: ScheduleDialogProps) {
   const { toast } = useToast();
-  const [date, setDate] = useState(customer?.scheduled_date ?? "");
-  const [time, setTime] = useState(customer?.scheduled_time ?? "");
+  const [date, setDate] = useState(customer?.scheduled_date?.split("T")[0] ?? "");
+  const [time, setTime] = useState(customer?.scheduled_time ?? "17:00");
   const [staffId, setStaffId] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
@@ -71,7 +71,7 @@ function ScheduleDialog({ customer, onClose, onSaved }: ScheduleDialogProps) {
 
   async function handleSave() {
     if (!customer) return;
-    if (!date || !time || !staffId) {
+    if (!date || !time || (!isEdit && !staffId)) {
       toast({ title: "Date, time, and staff are required", variant: "destructive" });
       return;
     }
