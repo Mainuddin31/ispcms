@@ -12,3 +12,5 @@ git commit -m "feat: add Visiting module (visit scheduling, schedule view, dashb
 
 # Push
 git push origin main
+
+git pull origin main && docker compose up -d --build backend frontend

@@ -8,7 +8,7 @@ import (
 
 type ActivityService interface {
 	Log(userID *uuid.UUID, module, activityType, title, description, refType, refID string)
-	List(module, period string, limit int) ([]models.ActivityLog, error)
+	List(module, period string, limit int, userID *uuid.UUID) ([]models.ActivityLog, error)
 }
 
 type activityService struct {
@@ -37,10 +37,11 @@ func (s *activityService) Log(
 	_ = s.repo.Create(a)
 }
 
-func (s *activityService) List(module, period string, limit int) ([]models.ActivityLog, error) {
+func (s *activityService) List(module, period string, limit int, userID *uuid.UUID) ([]models.ActivityLog, error) {
 	return s.repo.List(repositories.ActivityFilter{
 		Module: module,
 		Period: period,
 		Limit:  limit,
+		UserID: userID,
 	})
 }

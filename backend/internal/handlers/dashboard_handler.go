@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"github.com/ispcms/backend/internal/middleware"
 	"github.com/ispcms/backend/internal/repositories"
 	"github.com/ispcms/backend/internal/services"
@@ -51,7 +52,16 @@ func (h *DashboardHandler) Activities(c *fiber.Ctx) error {
 	period := c.Query("period", "30days")
 	limit := c.QueryInt("limit", 30)
 
-	activities, err := h.activitySvc.List(module, period, limit)
+	// Non-admin users only see their own activity log entries.
+	var activityUserID *uuid.UUID
+	if userID, ok := middleware.GetCurrentUserID(c); ok {
+		_, isSuperAdmin, _ := h.roleRepo.GetUserAccountPrefixes(userID)
+		if !isSuperAdmin {
+			activityUserID = &userID
+		}
+	}
+
+	activities, err := h.activitySvc.List(module, period, limit, activityUserID)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"success": false, "error": err.Error()})
 	}

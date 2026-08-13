@@ -81,8 +81,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const hasPermission = useCallback(
     (module: string, action: string) => {
       if (!user?.roles) return false;
-      // Super admin bypass
-      if (hasRole("super_admin")) return true;
+      // Super admin + admin bypass (matches backend GetUserAccountPrefixes logic)
+      if (hasRole("super_admin") || hasRole("admin")) return true;
       return user.roles.some((role) =>
         role.permissions?.some(
           (p) => p.module === module && p.action === action

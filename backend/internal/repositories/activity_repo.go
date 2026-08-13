@@ -13,6 +13,7 @@ type ActivityFilter struct {
 	Module string
 	Period string // today | 7days | 30days | all
 	Limit  int
+	UserID *uuid.UUID // when set, scope to this user's activity only
 }
 
 type ActivityLogRepository interface {
@@ -36,6 +37,9 @@ func (r *activityLogRepository) List(f ActivityFilter) ([]models.ActivityLog, er
 		Preload("User").
 		Where("activity_logs.deleted_at IS NULL")
 
+	if f.UserID != nil {
+		q = q.Where("activity_logs.user_id = ?", f.UserID)
+	}
 	if f.Module != "" && f.Module != "all" {
 		q = q.Where("module = ?", f.Module)
 	}

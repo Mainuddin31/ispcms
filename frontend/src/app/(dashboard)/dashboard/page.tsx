@@ -136,7 +136,8 @@ function activityMeta(a: ActivityLog) {
 export default function DashboardPage() {
   const [activityPeriod, setActivityPeriod] = useState("30days");
   const [activityModule, setActivityModule] = useState("");
-  const { hasPermission } = useAuth();
+  const { hasPermission, hasRole, user } = useAuth();
+  const isSuperOrAdmin = hasRole("super_admin") || hasRole("admin");
 
   // Permission flags — drive section visibility
   const canBilling  = hasPermission("billing",  "view");
@@ -183,6 +184,32 @@ export default function DashboardPage() {
           </Button>
         </div>
 
+        {/* ── Logged-in user info ──────────────────────────────────────────── */}
+        {user && (
+          <div className="flex items-center gap-4 p-4 rounded-xl border border-border bg-card">
+            <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white text-xl font-bold flex-shrink-0 select-none">
+              {user.full_name.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-foreground leading-tight">{user.full_name}</p>
+              <p className="text-sm text-muted-foreground">@{user.username}</p>
+            </div>
+            <div className="flex gap-1.5 flex-wrap justify-end">
+              {user.roles?.map(r => (
+                <Badge key={r.id} variant="secondary" className="text-xs capitalize">
+                  {(r.display_name || r.name).replace(/_/g, " ")}
+                </Badge>
+              ))}
+            </div>
+            {user.last_login && (
+              <div className="text-right text-xs text-muted-foreground flex-shrink-0 hidden sm:block">
+                <p>Last login</p>
+                <p className="font-medium text-foreground">{formatRelative(user.last_login)}</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── Collections ───────────────────────────────────────────────────── */}
         {canBilling && (
           <div className="space-y-2">
@@ -212,7 +239,9 @@ export default function DashboardPage() {
         {canVisiting && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Today&apos;s Visits</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {isSuperOrAdmin ? "Today's Visits" : "My Today's Visits"}
+              </p>
               <Link href="/visiting/schedule?date_preset=today" className="text-xs text-blue-500 hover:text-blue-400 font-medium flex items-center gap-0.5">
                 View All <ChevronRight className="w-3.5 h-3.5" />
               </Link>
@@ -248,7 +277,9 @@ export default function DashboardPage() {
                         <div>
                           <p className="text-2xl font-bold leading-none">{stats.today_visits_count}</p>
                           <p className="text-xs text-muted-foreground">
-                            {Object.keys(byStaff).length} staff · scheduled today
+                            {isSuperOrAdmin
+                              ? `${Object.keys(byStaff).length} staff · scheduled today`
+                              : "scheduled for me today"}
                           </p>
                         </div>
                       </div>
@@ -479,7 +510,9 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
-                <CardTitle className="text-sm font-semibold">System Activity</CardTitle>
+                <CardTitle className="text-sm font-semibold">
+                  {isSuperOrAdmin ? "System Activity" : "My Activity"}
+                </CardTitle>
                 <div className="flex items-center gap-2 flex-wrap">
                   {/* Period filter */}
                   <div className="flex rounded-md border overflow-hidden">
