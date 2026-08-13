@@ -110,6 +110,13 @@ type OLT struct {
 	// Status
 	Status string `gorm:"type:varchar(20);default:'active'" json:"status"` // active | maintenance | offline | disabled
 
+	// CLI access (Telnet/SSH) — used when SNMP FDB cannot resolve ONU-level MACs
+	CLIProtocol      string `gorm:"type:varchar(10)" json:"cli_protocol"`       // "telnet" | "ssh" | "" (disabled)
+	CLIPort          int    `gorm:"default:0" json:"cli_port"`                  // 0 = use protocol default (23/22)
+	CLIUsername      string `gorm:"type:varchar(100)" json:"cli_username"`
+	CLIPassword      string `gorm:"type:text" json:"cli_password"`               // encrypted
+	CLIEnablePassword string `gorm:"type:text" json:"cli_enable_password"`       // encrypted; empty = same as CLIPassword
+
 	// Sync scheduling
 	SyncInterval int        `gorm:"default:0" json:"sync_interval"` // minutes; 0 = manual
 	LastSyncAt   *time.Time `json:"last_sync_at"`
@@ -223,6 +230,7 @@ type OLTSyncLog struct {
 	NewONUs         int `json:"new_onus"`
 	UpdatedONUs     int `json:"updated_onus"`
 	ArchivedONUs    int `json:"archived_onus"`
+	LinkedONUs      int `json:"linked_onus"` // ONUs auto-linked to internet accounts during this sync
 	ErrorMessage    string `gorm:"type:text" json:"error_message,omitempty"`
 }
 

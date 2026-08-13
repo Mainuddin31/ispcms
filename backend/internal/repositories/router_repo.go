@@ -9,6 +9,7 @@ import (
 type RouterRepository interface {
 	FindAll(page, pageSize int, search string) ([]models.Router, int64, error)
 	FindByID(id uuid.UUID) (*models.Router, error)
+	FindActiveWithInterval() ([]models.Router, error) // for scheduler
 	Create(r *models.Router) error
 	Update(r *models.Router) error
 	Delete(id uuid.UUID) error
@@ -20,6 +21,12 @@ type RouterRepository interface {
 type routerRepository struct{ db *gorm.DB }
 
 func NewRouterRepository(db *gorm.DB) RouterRepository { return &routerRepository{db: db} }
+
+func (r *routerRepository) FindActiveWithInterval() ([]models.Router, error) {
+	var routers []models.Router
+	err := r.db.Where("status = 'active' AND sync_interval > 0").Find(&routers).Error
+	return routers, err
+}
 
 func (r *routerRepository) FindAll(page, pageSize int, search string) ([]models.Router, int64, error) {
 	var routers []models.Router

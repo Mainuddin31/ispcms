@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/ispcms/backend/internal/config"
@@ -22,26 +23,28 @@ type RouterService interface {
 }
 
 type CreateRouterRequest struct {
-	Name        string `json:"name" validate:"required"`
-	IPAddress   string `json:"ip_address" validate:"required"`
-	APIPort     int    `json:"api_port"`
-	Username    string `json:"username" validate:"required"`
-	Password    string `json:"password" validate:"required"`
-	Location    string `json:"location"`
-	POPName     string `json:"pop_name"`
-	Description string `json:"description"`
+	Name         string `json:"name" validate:"required"`
+	IPAddress    string `json:"ip_address" validate:"required"`
+	APIPort      int    `json:"api_port"`
+	Username     string `json:"username" validate:"required"`
+	Password     string `json:"password" validate:"required"`
+	Location     string `json:"location"`
+	POPName      string `json:"pop_name"`
+	Description  string `json:"description"`
+	SyncInterval int    `json:"sync_interval"` // minutes; 0 = manual only; default 60
 }
 
 type UpdateRouterRequest struct {
-	Name        string `json:"name"`
-	IPAddress   string `json:"ip_address"`
-	APIPort     int    `json:"api_port"`
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	Location    string `json:"location"`
-	POPName     string `json:"pop_name"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
+	Name         string `json:"name"`
+	IPAddress    string `json:"ip_address"`
+	APIPort      int    `json:"api_port"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	Location     string `json:"location"`
+	POPName      string `json:"pop_name"`
+	Description  string `json:"description"`
+	Status       string `json:"status"`
+	SyncInterval *int   `json:"sync_interval"` // pointer so 0 is a valid value
 }
 
 type routerService struct {
@@ -72,6 +75,11 @@ func (s *routerService) Create(req CreateRouterRequest) (*models.Router, error) 
 		return nil, errors.New("failed to encrypt credentials")
 	}
 
+	syncInterval := req.SyncInterval
+	if syncInterval == 0 {
+		syncInterval = 60 // default 60 minutes
+	}
+
 	router := &models.Router{
 		Name:             req.Name,
 		IPAddress:        req.IPAddress,
@@ -83,6 +91,7 @@ func (s *routerService) Create(req CreateRouterRequest) (*models.Router, error) 
 		Description:      req.Description,
 		Status:           "active",
 		ConnectionStatus: "disconnected",
+		SyncInterval:     syncInterval,
 	}
 	if err := s.routerRepo.Create(router); err != nil {
 		return nil, err
@@ -126,6 +135,9 @@ func (s *routerService) Update(id uuid.UUID, req UpdateRouterRequest) (*models.R
 	if req.Status != "" {
 		router.Status = req.Status
 	}
+	if req.SyncInterval != nil {
+		router.SyncInterval = *req.SyncInterval
+	}
 	if err := s.routerRepo.Update(router); err != nil {
 		return nil, err
 	}
@@ -155,4 +167,58 @@ func (s *routerService) TestConnection(id uuid.UUID) error {
 
 func (s *routerService) TestConnectionRaw(ip string, port int, username, password string) error {
 	return mikrotik.TestConnection(ip, port, username, password)
+}
+
+// ── Router Background Scheduler ───────────────────────────────────────────────
+
+// RouterScheduler periodically syncs routers that have a non-zero SyncInterval.
+type RouterScheduler struct {
+	routerRepo repositories.RouterRepository
+	syncSvc    SyncService
+	stopCh     chan struct{}
+}
+
+func NewRouterScheduler(routerRepo repositories.RouterRepository, syncSvc SyncService) *RouterScheduler {
+	return &RouterScheduler{routerRepo: routerRepo, syncSvc: syncSvc, stopCh: make(chan struct{})}
+}
+
+func (sc *RouterScheduler) Start() {
+	go sc.run()
+}
+
+func (sc *RouterScheduler) Stop() {
+	close(sc.stopCh)
+}
+
+func (sc *RouterScheduler) run() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-sc.stopCh:
+			return
+		case <-ticker.C:
+			sc.tick()
+		}
+	}
+}
+
+func (sc *RouterScheduler) tick() {
+	routers, err := sc.routerRepo.FindActiveWithInterval()
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	for _, r := range routers {
+		if r.SyncInterval <= 0 {
+			continue
+		}
+		due := r.LastSyncTime == nil ||
+			now.Sub(*r.LastSyncTime) >= time.Duration(r.SyncInterval)*time.Minute
+		if due {
+			go func(id uuid.UUID) {
+				_, _ = sc.syncSvc.SyncRouter(id)
+			}(r.ID)
+		}
+	}
 }

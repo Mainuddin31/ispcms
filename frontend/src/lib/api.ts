@@ -310,6 +310,11 @@ export const onusApi = {
   get: (id: string) => api.get(`/onus/${id}`),
   link: (id: string, internet_account_id: string | null) =>
     api.patch(`/onus/${id}/link`, { internet_account_id }),
+  // Auto-link all unlinked ONUs to internet accounts via MAC/caller_id matching
+  autoLink: (oltId?: string) =>
+    oltId
+      ? api.post(`/olts/${oltId}/auto-link-onus`)
+      : api.post("/onus/auto-link"),
 };
 
 // ─── Reports ──────────────────────────────────────────────────────────────────

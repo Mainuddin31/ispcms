@@ -12,6 +12,7 @@ import (
 	"github.com/ispcms/backend/internal/models"
 	"github.com/ispcms/backend/internal/repositories"
 	"github.com/ispcms/backend/pkg/snmp"
+	"github.com/ispcms/backend/pkg/telnet"
 	"github.com/ispcms/backend/pkg/utils"
 )
 
@@ -20,6 +21,15 @@ type OLTSyncService interface {
 	Sync(oltID uuid.UUID) (*models.OLTSyncLog, error)
 	TestConnection(oltID uuid.UUID) error
 	TestConnectionRaw(ip, community string, port int, version string) error
+	// SNMPProbe walks the given OID on the OLT and returns up to limit entries
+	// as raw key→value strings. Useful for testing OIDs before adding to a profile.
+	SNMPProbe(oltID uuid.UUID, oid string, limit int) ([]SNMPProbeEntry, error)
+}
+
+// SNMPProbeEntry is one raw result from an SNMP walk.
+type SNMPProbeEntry struct {
+	OIDSuffix string `json:"oid_suffix"`
+	Value     string `json:"value"`
 }
 
 type oltSyncService struct {
@@ -79,8 +89,8 @@ func (s *oltSyncService) Sync(oltID uuid.UUID) (*models.OLTSyncLog, error) {
 		log.Status = "success"
 		_ = s.oltRepo.UpdateLastSync(oltID, now)
 		if s.activitySvc != nil {
-			desc := fmt.Sprintf("OLT: %s | Ports: %d | ONUs: %d | New: %d | Updated: %d",
-				olt.Name, log.PortsDiscovered, log.ONUsDiscovered, log.NewONUs, log.UpdatedONUs)
+			desc := fmt.Sprintf("OLT: %s | Ports: %d | ONUs: %d | New: %d | Updated: %d | Auto-linked: %d",
+				olt.Name, log.PortsDiscovered, log.ONUsDiscovered, log.NewONUs, log.UpdatedONUs, log.LinkedONUs)
 			s.activitySvc.Log(nil, "network", "olt_sync_completed", "OLT Sync Completed", desc, "olt_sync_log", log.ID.String())
 		}
 	}
@@ -286,6 +296,28 @@ func (s *oltSyncService) doSync(olt *models.OLT, syncLog *models.OLTSyncLog) err
 	archived, _ := s.onuRepo.ArchiveMissing(olt.ID, activeKeys)
 	log.ArchivedONUs = int(archived)
 
+	// ── 5b. Auto-link ONUs to internet accounts by ONU MAC ───────────────────
+	// Fast path: matches onus.mac_address against internet_accounts.caller_id
+	// using a single SQL UPDATE. Works when the ONU hardware MAC == caller_id.
+	linked, _ := s.onuRepo.AutoLinkByMAC(&olt.ID)
+	syncLog.LinkedONUs = int(linked)
+
+	// ── 5c. Auto-link via bridge MAC table (FDB or CLI) ──────────────────────
+	// Preferred: CLI scrape (Telnet/SSH) — gives exact ONU-level MACs on OLTs
+	// whose SNMP FDB only exposes port-level entries (e.g. Richerlink).
+	// Fallback: SNMP FDB walk — used when CLI is not configured (e.g. VSOL).
+	var macEntries []repositories.MACTableEntry
+	if olt.CLIProtocol != "" && olt.CLIUsername != "" {
+		macEntries = s.walkCLIMACTable(olt)
+	}
+	if len(macEntries) == 0 {
+		macEntries = s.walkFDBTable(client, oids)
+	}
+	if len(macEntries) > 0 {
+		fdbLinked, _ := s.onuRepo.LinkFromMACTable(olt.ID, macEntries)
+		syncLog.LinkedONUs += int(fdbLinked)
+	}
+
 	// ── 6. Update port counts ─────────────────────────────────────────────────
 	for portIdx, portID := range portIndexToID {
 		count, _ := s.onuRepo.CountByOLTAndPort(olt.ID, portID)
@@ -358,6 +390,44 @@ func (s *oltSyncService) TestConnectionRaw(ip, community string, port int, versi
 	}
 	defer client.Close()
 	return client.TestConnection()
+}
+
+// SNMPProbe walks oid on the given OLT and returns up to limit raw entries.
+func (s *oltSyncService) SNMPProbe(oltID uuid.UUID, oid string, limit int) ([]SNMPProbeEntry, error) {
+	olt, err := s.oltRepo.FindByID(oltID)
+	if err != nil {
+		return nil, fmt.Errorf("OLT not found")
+	}
+	client, err := s.buildClient(olt)
+	if err != nil {
+		return nil, fmt.Errorf("connect: %w", err)
+	}
+	defer client.Close()
+
+	if olt.SNMPProfile != nil && olt.SNMPProfile.OIDMap["use_getnext"] == "true" {
+		client.SetUseGetNext(true)
+	}
+
+	walkResult, err := client.Walk(oid)
+	if err != nil {
+		return nil, fmt.Errorf("walk failed: %w", err)
+	}
+
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+
+	entries := make([]SNMPProbeEntry, 0, limit)
+	for suffix, val := range walkResult {
+		entries = append(entries, SNMPProbeEntry{
+			OIDSuffix: suffix,
+			Value:     fmt.Sprintf("%v", val),
+		})
+		if len(entries) >= limit {
+			break
+		}
+	}
+	return entries, nil
 }
 
 // buildClient creates an SNMP client from the OLT configuration.
@@ -514,4 +584,221 @@ func parseEPONIfname(name string) (portIdx, onuSlot int, err error) {
 		return 0, 0, fmt.Errorf("bad slot in %q: %w", name, err)
 	}
 	return p, s, nil
+}
+
+// parseONUIfDescr extracts (portIdx, onuSlot) from ONU interface description strings
+// returned by SNMP ifDescr. Supports multiple common EPON naming formats:
+//
+//	"EPON0/1:12"  → port=1, slot=12  (VSOL V2 / slash-colon format)
+//	"epon1:onu12" → port=1, slot=12  (epon<P>:onu<S> format)
+//	"epon1:12"    → port=1, slot=12  (epon<P>:<S> format)
+//
+// Returns an error for non-ONU interfaces (uplink GE ports, CPU, etc.).
+func parseONUIfDescr(name string) (portIdx, onuSlot int, err error) {
+	s := strings.TrimSpace(strings.ToLower(name))
+
+	// Format 1: "EPON0/P:S" — existing logic covers this
+	if strings.Contains(s, "/") && strings.Contains(s, ":") {
+		return parseEPONIfname(name)
+	}
+
+	// Format 2 & 3: "eponP:onuS" or "eponP:S"
+	if strings.HasPrefix(s, "epon") {
+		rest := s[4:] // strip "epon"
+		colonIdx := strings.Index(rest, ":")
+		if colonIdx < 0 {
+			return 0, 0, fmt.Errorf("not ONU ifDescr: %q", name)
+		}
+		portStr := rest[:colonIdx]
+		slotPart := strings.TrimPrefix(rest[colonIdx+1:], "onu") // strip optional "onu" prefix
+		p, err1 := strconv.Atoi(portStr)
+		sl, err2 := strconv.Atoi(slotPart)
+		if err1 != nil || err2 != nil {
+			return 0, 0, fmt.Errorf("not ONU ifDescr: %q", name)
+		}
+		return p, sl, nil
+	}
+
+	return 0, 0, fmt.Errorf("not ONU ifDescr: %q", name)
+}
+
+// walkFDBTable walks the OLT's bridge MAC address table (FDB) via SNMP and
+// returns a list of (customer_CPE_MAC, portIdx, onuSlot) entries.
+//
+// It uses three OIDs from the SNMP profile:
+//   - mac_table_oid           dot1qTpFdbPort  1.3.6.1.2.1.17.7.1.2.2.1.2
+//   - mac_table_port_ifindex_oid  dot1dBasePortIfIndex  1.3.6.1.2.1.17.1.4.1.2
+//   - mac_table_ifdescr_oid   ifDescr  1.3.6.1.2.1.2.2.1.2
+//
+// If any OID is missing or a walk fails, an empty slice is returned silently.
+func (s *oltSyncService) walkFDBTable(client *snmp.Client, oids models.OIDMap) []repositories.MACTableEntry {
+	fdbOID, ok1 := oids["mac_table_oid"]
+	portIfIdxOID, ok2 := oids["mac_table_port_ifindex_oid"]
+	ifDescrOID, ok3 := oids["mac_table_ifdescr_oid"]
+	if !ok1 || !ok2 || !ok3 || fdbOID == "" || portIfIdxOID == "" || ifDescrOID == "" {
+		return nil
+	}
+
+	// ── Step 1: Walk dot1qTpFdbPort ──────────────────────────────────────────
+	// Index suffix: <fid>.<b1>.<b2>.<b3>.<b4>.<b5>.<b6>  value: port_number
+	fdbWalk, err := client.Walk(fdbOID)
+	if err != nil || len(fdbWalk) == 0 {
+		log.Printf("[SNMP-FDB] mac_table_oid walk failed or empty: %v", err)
+		return nil
+	}
+
+	// (port_number → list of MACs learned on that port)
+	portMACs := map[int][]string{}
+	for suffix, val := range fdbWalk {
+		parts := snmp.ParseIndex(suffix)
+		if len(parts) < 6 {
+			continue // need at least 6 MAC bytes
+		}
+		// Always take the last 6 elements as MAC bytes.
+		// Different OLT vendors prefix the index differently:
+		//   Standard dot1q: <fid>.<mac6>            → 7 elements
+		//   VSOL EPON:      <extra>.<fid>.<mac6>    → 8 elements
+		//   Richerlink:     <mac6> only             → 6 elements
+		macBytes := parts[len(parts)-6:]
+		var hexParts [6]string
+		for i, b := range macBytes {
+			hexParts[i] = fmt.Sprintf("%02x", b)
+		}
+		mac := strings.Join(hexParts[:], ":")
+
+		portNum, ok := val.(int64)
+		if !ok || portNum <= 0 {
+			continue
+		}
+		portMACs[int(portNum)] = append(portMACs[int(portNum)], mac)
+	}
+
+	if len(portMACs) == 0 {
+		return nil
+	}
+
+	// ── Step 2: Walk dot1dBasePortIfIndex ────────────────────────────────────
+	// Index suffix: <port_number>  value: ifIndex
+	portIfIdxWalk, err := client.Walk(portIfIdxOID)
+	if err != nil {
+		log.Printf("[SNMP-FDB] mac_table_port_ifindex_oid walk failed: %v", err)
+		return nil
+	}
+	portToIfIdx := map[int]int{}
+	for suffix, val := range portIfIdxWalk {
+		parts := snmp.ParseIndex(suffix)
+		if len(parts) < 1 {
+			continue
+		}
+		ifIdx, ok := val.(int64)
+		if !ok || ifIdx <= 0 {
+			continue
+		}
+		portToIfIdx[parts[0]] = int(ifIdx)
+	}
+
+	// ── Step 3: Walk ifDescr ─────────────────────────────────────────────────
+	// Index suffix: <ifIndex>  value: interface name string
+	ifDescrWalk, err := client.Walk(ifDescrOID)
+	if err != nil {
+		log.Printf("[SNMP-FDB] mac_table_ifdescr_oid walk failed: %v", err)
+		return nil
+	}
+	ifIdxToDescr := map[int]string{}
+	for suffix, val := range ifDescrWalk {
+		parts := snmp.ParseIndex(suffix)
+		if len(parts) < 1 {
+			continue
+		}
+		ifIdxToDescr[parts[0]] = fmt.Sprintf("%v", val)
+	}
+
+	// ── Step 4: Build (MAC → ONU) mapping ────────────────────────────────────
+	var entries []repositories.MACTableEntry
+	seen := map[string]bool{} // deduplicate (mac, port, slot)
+
+	for portNum, macs := range portMACs {
+		ifIdx, ok := portToIfIdx[portNum]
+		if !ok {
+			// Fallback: treat the FDB port value directly as an ifIndex.
+			// VSOL EPON OLTs map customer MACs to ONU sub-interface ifIndexes
+			// (e.g., FDB port 49 = ifIndex 49 = "EPON0/3:21"). These ONU
+			// sub-interface ports do not appear in dot1dBasePortIfIndex — only
+			// physical uplink ports (1-8) do.
+			ifIdx = portNum
+		}
+		descr, ok := ifIdxToDescr[ifIdx]
+		if !ok {
+			continue
+		}
+		portIdx, onuSlot, err := parseONUIfDescr(descr)
+		if err != nil {
+			continue // not an ONU sub-interface (uplink port, CPU, etc.)
+		}
+		for _, mac := range macs {
+			key := fmt.Sprintf("%d:%d:%s", portIdx, onuSlot, mac)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			entries = append(entries, repositories.MACTableEntry{
+				MAC:     mac,
+				PortIdx: portIdx,
+				ONUSlot: onuSlot,
+			})
+		}
+	}
+
+	log.Printf("[SNMP-FDB] MAC table walk: %d raw FDB entries → %d ONU-MAC mappings", len(fdbWalk), len(entries))
+	return entries
+}
+
+// walkCLIMACTable connects to the OLT via Telnet/SSH, runs
+// "show mac-address-table", and returns the parsed ONU-level MAC entries.
+// Used for OLTs whose SNMP FDB only exposes port-level MACs (e.g. Richerlink).
+func (s *oltSyncService) walkCLIMACTable(olt *models.OLT) []repositories.MACTableEntry {
+	cliPass, err := utils.Decrypt(olt.CLIPassword, s.jwtSecret)
+	if err != nil {
+		log.Printf("[CLI-MAC] OLT %s: decrypt CLI password: %v", olt.Name, err)
+		return nil
+	}
+	enablePass := ""
+	if olt.CLIEnablePassword != "" {
+		enablePass, err = utils.Decrypt(olt.CLIEnablePassword, s.jwtSecret)
+		if err != nil {
+			log.Printf("[CLI-MAC] OLT %s: decrypt enable password: %v", olt.Name, err)
+			return nil
+		}
+	}
+
+	port := olt.CLIPort
+	if port == 0 {
+		if strings.ToLower(olt.CLIProtocol) == "ssh" {
+			port = 22
+		} else {
+			port = 23
+		}
+	}
+
+	client, err := telnet.New(olt.ManagementIP, port, 30*time.Second)
+	if err != nil {
+		log.Printf("[CLI-MAC] OLT %s: connect %s:%d: %v", olt.Name, olt.ManagementIP, port, err)
+		return nil
+	}
+	defer client.Close()
+
+	if err := client.Login(olt.CLIUsername, cliPass, enablePass); err != nil {
+		log.Printf("[CLI-MAC] OLT %s: login failed: %v", olt.Name, err)
+		return nil
+	}
+
+	output, err := client.RunCommand("show mac-address-table", 60*time.Second, "EPON#", "#")
+	if err != nil {
+		log.Printf("[CLI-MAC] OLT %s: show mac-address-table: %v", olt.Name, err)
+		return nil
+	}
+
+	entries := telnet.ParseRicherlinkMACTable(output)
+	log.Printf("[CLI-MAC] OLT %s: parsed %d ONU-MAC entries from CLI", olt.Name, len(entries))
+	return entries
 }

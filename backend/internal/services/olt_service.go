@@ -95,6 +95,12 @@ type CreateOLTInput struct {
 	Description    string
 	Status         string
 	SyncInterval   int
+	// CLI access
+	CLIProtocol       string
+	CLIPort           int
+	CLIUsername       string
+	CLIPassword       string
+	CLIEnablePassword string
 }
 
 type OLTService interface {
@@ -154,6 +160,9 @@ func (s *oltService) Create(input CreateOLTInput, jwtSecret string) (*models.OLT
 		Description:    input.Description,
 		Status:         input.Status,
 		SyncInterval:   input.SyncInterval,
+		CLIProtocol:    input.CLIProtocol,
+		CLIPort:        input.CLIPort,
+		CLIUsername:    input.CLIUsername,
 	}
 	if olt.Status == "" {
 		olt.Status = "active"
@@ -171,6 +180,20 @@ func (s *oltService) Create(input CreateOLTInput, jwtSecret string) (*models.OLT
 			return nil, err
 		}
 		olt.V3PrivPassword = enc
+	}
+	if input.CLIPassword != "" {
+		enc, err := utils.Encrypt(input.CLIPassword, jwtSecret)
+		if err != nil {
+			return nil, err
+		}
+		olt.CLIPassword = enc
+	}
+	if input.CLIEnablePassword != "" {
+		enc, err := utils.Encrypt(input.CLIEnablePassword, jwtSecret)
+		if err != nil {
+			return nil, err
+		}
+		olt.CLIEnablePassword = enc
 	}
 	return olt, s.oltRepo.Create(olt)
 }
@@ -199,6 +222,9 @@ func (s *oltService) Update(id uuid.UUID, input CreateOLTInput, jwtSecret string
 	olt.Description = input.Description
 	olt.Status = input.Status
 	olt.SyncInterval = input.SyncInterval
+	olt.CLIProtocol = input.CLIProtocol
+	olt.CLIPort = input.CLIPort
+	olt.CLIUsername = input.CLIUsername
 
 	if input.V3AuthPassword != "" && input.V3AuthPassword != "***" {
 		enc, _ := utils.Encrypt(input.V3AuthPassword, jwtSecret)
@@ -207,6 +233,14 @@ func (s *oltService) Update(id uuid.UUID, input CreateOLTInput, jwtSecret string
 	if input.V3PrivPassword != "" && input.V3PrivPassword != "***" {
 		enc, _ := utils.Encrypt(input.V3PrivPassword, jwtSecret)
 		olt.V3PrivPassword = enc
+	}
+	if input.CLIPassword != "" && input.CLIPassword != "***" {
+		enc, _ := utils.Encrypt(input.CLIPassword, jwtSecret)
+		olt.CLIPassword = enc
+	}
+	if input.CLIEnablePassword != "" && input.CLIEnablePassword != "***" {
+		enc, _ := utils.Encrypt(input.CLIEnablePassword, jwtSecret)
+		olt.CLIEnablePassword = enc
 	}
 	return olt, s.oltRepo.Update(olt)
 }
@@ -233,6 +267,9 @@ type ONUService interface {
 	List(f repositories.ONUFilter) ([]models.ONU, int64, error)
 	Get(id uuid.UUID) (*models.ONU, error)
 	Link(id uuid.UUID, accountID *uuid.UUID) error
+	// AutoLink matches unlinked ONUs to internet accounts via MAC/caller_id comparison.
+	// Pass a non-nil oltID to restrict to one OLT; nil means all OLTs.
+	AutoLink(oltID *uuid.UUID) (int64, error)
 }
 
 type onuService struct{ repo repositories.ONURepository }
@@ -246,6 +283,7 @@ func (s *onuService) List(f repositories.ONUFilter) ([]models.ONU, int64, error)
 }
 func (s *onuService) Get(id uuid.UUID) (*models.ONU, error)           { return s.repo.FindByID(id) }
 func (s *onuService) Link(id uuid.UUID, accountID *uuid.UUID) error { return s.repo.LinkToAccount(id, accountID) }
+func (s *onuService) AutoLink(oltID *uuid.UUID) (int64, error)        { return s.repo.AutoLinkByMAC(oltID) }
 
 // ── OLT Background Scheduler ──────────────────────────────────────────────────
 

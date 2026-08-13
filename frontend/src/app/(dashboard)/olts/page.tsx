@@ -92,6 +92,11 @@ interface OLTFormData {
   description: string;
   status: string;
   sync_interval: number;
+  cli_protocol: string;
+  cli_port: number;
+  cli_username: string;
+  cli_password: string;
+  cli_enable_password: string;
 }
 
 const defaultForm: OLTFormData = {
@@ -102,6 +107,8 @@ const defaultForm: OLTFormData = {
   v3_priv_protocol: "AES", v3_priv_password: "",
   pop: "", rack: "", cabinet: "", description: "",
   status: "active", sync_interval: 30,
+  cli_protocol: "telnet", cli_port: 23, cli_username: "",
+  cli_password: "", cli_enable_password: "",
 };
 
 function OLTFormDialog({
@@ -146,6 +153,11 @@ function OLTFormDialog({
             description: olt.description ?? "",
             status: olt.status,
             sync_interval: olt.sync_interval,
+            cli_protocol: olt.cli_protocol ?? "telnet",
+            cli_port: olt.cli_port ?? 23,
+            cli_username: olt.cli_username ?? "",
+            cli_password: "",
+            cli_enable_password: "",
           }
         : defaultForm
       );
@@ -308,6 +320,53 @@ function OLTFormDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {/* CLI access — Richerlink only */}
+          {form.vendor.toLowerCase().includes("richerlink") && (
+            <>
+              <div className="col-span-2 border-t pt-3 mt-1">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">
+                  CLI Access (Telnet) — for ONU auto-linking
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label>CLI Username</Label>
+                    <Input
+                      value={form.cli_username}
+                      onChange={(e) => set("cli_username", e.target.value)}
+                      placeholder="admin"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>CLI Port</Label>
+                    <Input
+                      type="number"
+                      value={form.cli_port}
+                      onChange={(e) => set("cli_port", Number(e.target.value))}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>CLI Password</Label>
+                    <Input
+                      type="password"
+                      value={form.cli_password}
+                      onChange={(e) => set("cli_password", e.target.value)}
+                      placeholder={form.cli_username ? "leave blank to keep existing" : ""}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Enable Password</Label>
+                    <Input
+                      type="password"
+                      value={form.cli_enable_password}
+                      onChange={(e) => set("cli_enable_password", e.target.value)}
+                      placeholder="leave blank = same as CLI password"
+                    />
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Location */}
           <div className="space-y-1">
@@ -474,7 +533,14 @@ export default function OLTsPage() {
                   <TableRow key={olt.id}>
                     <TableCell>
                       <div>
-                        <p className="font-medium text-sm">{olt.name}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-sm">{olt.name}</p>
+                          {olt.cli_protocol && (
+                            <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[10px] font-medium uppercase">
+                              {olt.cli_protocol}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-slate-400">{olt.management_ip}</p>
                         {olt.vendor && <p className="text-xs text-slate-400">{olt.vendor} {olt.model}</p>}
                       </div>

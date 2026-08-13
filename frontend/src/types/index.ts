@@ -41,6 +41,7 @@ export interface Router {
   description?: string;
   status: "active" | "disabled";
   connection_status: "connected" | "disconnected";
+  sync_interval: number;
   last_connected?: string;
   last_sync_time?: string;
   created_at: string;
@@ -446,6 +447,9 @@ export interface OLT {
   status: "active" | "maintenance" | "offline" | "disabled";
   sync_interval: number;
   last_sync_at?: string;
+  cli_protocol?: string;
+  cli_port?: number;
+  cli_username?: string;
   deleted_at?: string;
   created_at: string;
   updated_at: string;

@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
+  Zap,
 } from "lucide-react";
 import { onusApi, oltsApi, internetAccountsApi } from "@/lib/api";
 import { ONU, OLT, PONPort, InternetAccount, PaginatedResponse } from "@/types";
@@ -285,8 +286,20 @@ export default function ONUsPage() {
   const [page, setPage] = useState(1);
   const [selectedONU, setSelectedONU] = useState<ONU | null>(null);
   const [linkTarget, setLinkTarget] = useState<ONU | null>(null);
+  const { toast } = useToast();
 
   const queryClient = useQueryClient();
+
+  const autoLinkMutation = useMutation({
+    mutationFn: () => onusApi.autoLink(oltFilter !== "all" ? oltFilter : undefined),
+    onSuccess: (res) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const linked = (res as any)?.data?.linked ?? 0;
+      toast({ title: `Auto-link complete — ${linked} ONU(s) linked to accounts` });
+      queryClient.invalidateQueries({ queryKey: ["onus"] });
+    },
+    onError: () => toast({ title: "Auto-link failed", variant: "destructive" }),
+  });
 
   const { data: onusData, isLoading } = useQuery<{ data: PaginatedResponse<ONU> }>({
     queryKey: ["onus", search, oltFilter, portFilter, statusFilter, unlinkedOnly, page],
@@ -379,6 +392,17 @@ export default function ONUsPage() {
           >
             <Filter className="w-3.5 h-3.5" />
             Unlinked only
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50 dark:text-blue-400 dark:border-blue-800 dark:hover:bg-blue-900/20"
+            onClick={() => autoLinkMutation.mutate()}
+            disabled={autoLinkMutation.isPending}
+            title={oltFilter !== "all" ? "Auto-link ONUs on selected OLT" : "Auto-link all unlinked ONUs"}
+          >
+            <Zap className="w-3.5 h-3.5" />
+            {autoLinkMutation.isPending ? "Linking…" : oltFilter !== "all" ? "Auto-Link This OLT" : "Auto-Link All"}
           </Button>
           <span className="self-center text-sm text-slate-400 ml-auto">{total} ONUs</span>
         </div>

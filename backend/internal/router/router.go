@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func Setup(db *gorm.DB, cfg *config.Config) (*fiber.App, *services.OLTScheduler) {
+func Setup(db *gorm.DB, cfg *config.Config) (*fiber.App, *services.OLTScheduler, *services.RouterScheduler) {
 	app := fiber.New(fiber.Config{
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
@@ -257,10 +257,13 @@ func Setup(db *gorm.DB, cfg *config.Config) (*fiber.App, *services.OLTScheduler)
 	olts.Post("/:id/test", perm("network", "view"), oltH.TestConnection)
 	olts.Get("/:id/sync-logs", perm("network", "view"), oltH.SyncLogs)
 	olts.Get("/:id/pon-ports", perm("network", "view"), oltH.PONPorts)
+	olts.Post("/:id/auto-link-onus", perm("network", "update"), onuH.AutoLink)
+	olts.Post("/:id/snmp-probe", perm("network", "view"), oltH.SNMPProbe)
 
 	// ONUs
 	onus := api.Group("/onus", jwtAuth)
 	onus.Get("/", perm("network", "view"), onuH.List)
+	onus.Post("/auto-link", perm("network", "update"), onuH.AutoLink) // all OLTs
 	onus.Get("/:id", perm("network", "view"), onuH.Get)
 	onus.Patch("/:id/link", perm("network", "update"), onuH.Link)
 
@@ -288,6 +291,7 @@ func Setup(db *gorm.DB, cfg *config.Config) (*fiber.App, *services.OLTScheduler)
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
 
-	scheduler := services.NewOLTScheduler(oltRepo, oltSyncSvc)
-	return app, scheduler
+	oltScheduler := services.NewOLTScheduler(oltRepo, oltSyncSvc)
+	routerScheduler := services.NewRouterScheduler(routerRepo, syncSvc)
+	return app, oltScheduler, routerScheduler
 }

@@ -29,6 +29,7 @@ const schema = z.object({
   location: z.string().optional(),
   pop_name: z.string().optional(),
   description: z.string().optional(),
+  sync_interval: z.coerce.number().min(0).default(60),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -51,7 +52,7 @@ export function RouterFormDialog({ open, onClose, router }: Props) {
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { api_port: 8728 },
+    defaultValues: { api_port: 8728, sync_interval: 60 },
   });
 
   useEffect(() => {
@@ -66,8 +67,9 @@ export function RouterFormDialog({ open, onClose, router }: Props) {
               location: router.location ?? "",
               pop_name: router.pop_name ?? "",
               description: router.description ?? "",
+              sync_interval: router.sync_interval ?? 60,
             }
-          : { api_port: 8728 }
+          : { api_port: 8728, sync_interval: 60 }
       );
     }
   }, [open, router, reset]);
@@ -130,6 +132,11 @@ export function RouterFormDialog({ open, onClose, router }: Props) {
             <div className="space-y-1.5">
               <Label>POP Name</Label>
               <Input placeholder="POP-01" {...register("pop_name")} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Auto-Sync Interval (minutes)</Label>
+              <Input type="number" min={0} placeholder="60" {...register("sync_interval")} />
+              <p className="text-xs text-muted-foreground">0 = manual only; default 60</p>
             </div>
             <div className="col-span-2 space-y-1.5">
               <Label>Description</Label>

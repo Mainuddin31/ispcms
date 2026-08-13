@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"fmt"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"github.com/ispcms/backend/internal/repositories"
@@ -224,6 +226,39 @@ func (h *OLTHandler) TestConnectionRaw(c *fiber.Ctx) error {
 	return utils.OK(c, fiber.Map{"reachable": true})
 }
 
+// SNMPProbe walks a given OID on the OLT and returns raw SNMP values.
+// POST /api/v1/olts/:id/snmp-probe
+// Body: { "oid": "1.3.6.1.2.1.17.7.1.2.2.1.2", "limit": 20 }
+func (h *OLTHandler) SNMPProbe(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return utils.BadRequest(c, "invalid id")
+	}
+	var body struct {
+		OID   string `json:"oid"`
+		Limit int    `json:"limit"`
+	}
+	if err := c.BodyParser(&body); err != nil || body.OID == "" {
+		return utils.BadRequest(c, "oid is required")
+	}
+	if body.Limit == 0 {
+		body.Limit = 20
+	}
+	entries, err := h.syncSvc.SNMPProbe(id, body.OID, body.Limit)
+	if err != nil {
+		return c.Status(200).JSON(fiber.Map{
+			"success": false,
+			"error":   err.Error(),
+			"entries": []interface{}{},
+		})
+	}
+	return utils.OK(c, fiber.Map{
+		"oid":     body.OID,
+		"count":   len(entries),
+		"entries": entries,
+	})
+}
+
 func (h *OLTHandler) Stats(c *fiber.Ctx) error {
 	stats, err := h.svc.Stats()
 	if err != nil {
@@ -314,6 +349,25 @@ func (h *ONUHandler) Get(c *fiber.Ctx) error {
 	return utils.OK(c, o)
 }
 
+// AutoLinkONUs runs the MAC-based auto-link for all ONUs (or a single OLT).
+// POST /api/v1/onus/auto-link          → all OLTs
+// POST /api/v1/olts/:id/auto-link-onus → one OLT
+func (h *ONUHandler) AutoLink(c *fiber.Ctx) error {
+	var oltID *uuid.UUID
+	if idStr := c.Params("id"); idStr != "" {
+		uid, err := uuid.Parse(idStr)
+		if err != nil {
+			return utils.BadRequest(c, "invalid olt id")
+		}
+		oltID = &uid
+	}
+	n, err := h.svc.AutoLink(oltID)
+	if err != nil {
+		return utils.InternalError(c, err)
+	}
+	return utils.OK(c, fiber.Map{"linked": n, "message": fmt.Sprintf("%d ONU(s) linked to internet accounts", n)})
+}
+
 func (h *ONUHandler) Link(c *fiber.Ctx) error {
 	id, err := uuid.Parse(c.Params("id"))
 	if err != nil {
@@ -343,27 +397,32 @@ func (h *ONUHandler) Link(c *fiber.Ctx) error {
 
 func parseOLTBody(c *fiber.Ctx) (*services.CreateOLTInput, error) {
 	var body struct {
-		Name           string `json:"name"`
-		Vendor         string `json:"vendor"`
-		Model          string `json:"model"`
-		SNMPProfileID  string `json:"snmp_profile_id"`
-		ManagementIP   string `json:"management_ip"`
-		SNMPVersion    string `json:"snmp_version"`
-		SNMPPort       int    `json:"snmp_port"`
-		Timeout        int    `json:"timeout"`
-		Retries        int    `json:"retries"`
-		Community      string `json:"community"`
-		V3Username     string `json:"v3_username"`
-		V3AuthProtocol string `json:"v3_auth_protocol"`
-		V3AuthPassword string `json:"v3_auth_password"`
-		V3PrivProtocol string `json:"v3_priv_protocol"`
-		V3PrivPassword string `json:"v3_priv_password"`
-		POP            string `json:"pop"`
-		Rack           string `json:"rack"`
-		Cabinet        string `json:"cabinet"`
-		Description    string `json:"description"`
-		Status         string `json:"status"`
-		SyncInterval   int    `json:"sync_interval"`
+		Name              string `json:"name"`
+		Vendor            string `json:"vendor"`
+		Model             string `json:"model"`
+		SNMPProfileID     string `json:"snmp_profile_id"`
+		ManagementIP      string `json:"management_ip"`
+		SNMPVersion       string `json:"snmp_version"`
+		SNMPPort          int    `json:"snmp_port"`
+		Timeout           int    `json:"timeout"`
+		Retries           int    `json:"retries"`
+		Community         string `json:"community"`
+		V3Username        string `json:"v3_username"`
+		V3AuthProtocol    string `json:"v3_auth_protocol"`
+		V3AuthPassword    string `json:"v3_auth_password"`
+		V3PrivProtocol    string `json:"v3_priv_protocol"`
+		V3PrivPassword    string `json:"v3_priv_password"`
+		POP               string `json:"pop"`
+		Rack              string `json:"rack"`
+		Cabinet           string `json:"cabinet"`
+		Description       string `json:"description"`
+		Status            string `json:"status"`
+		SyncInterval      int    `json:"sync_interval"`
+		CLIProtocol       string `json:"cli_protocol"`
+		CLIPort           int    `json:"cli_port"`
+		CLIUsername       string `json:"cli_username"`
+		CLIPassword       string `json:"cli_password"`
+		CLIEnablePassword string `json:"cli_enable_password"`
 	}
 	if err := c.BodyParser(&body); err != nil {
 		return nil, err
@@ -383,6 +442,11 @@ func parseOLTBody(c *fiber.Ctx) (*services.CreateOLTInput, error) {
 		V3PrivPassword: body.V3PrivPassword,
 		POP: body.POP, Rack: body.Rack, Cabinet: body.Cabinet,
 		Description: body.Description, Status: body.Status,
-		SyncInterval: body.SyncInterval,
+		SyncInterval:      body.SyncInterval,
+		CLIProtocol:       body.CLIProtocol,
+		CLIPort:           body.CLIPort,
+		CLIUsername:       body.CLIUsername,
+		CLIPassword:       body.CLIPassword,
+		CLIEnablePassword: body.CLIEnablePassword,
 	}, nil
 }

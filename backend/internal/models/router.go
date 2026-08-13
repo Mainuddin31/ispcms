@@ -19,6 +19,7 @@ type Router struct {
 	Description      string         `json:"description"`
 	Status           string         `gorm:"default:'active'" json:"status"`
 	ConnectionStatus string         `gorm:"default:'disconnected'" json:"connection_status"`
+	SyncInterval     int            `gorm:"default:60" json:"sync_interval"` // minutes; 0 = manual only
 	LastConnected    *time.Time     `json:"last_connected"`
 	LastSyncTime     *time.Time     `json:"last_sync_time"`
 	CreatedAt        time.Time      `json:"created_at"`

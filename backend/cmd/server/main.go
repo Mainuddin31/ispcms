@@ -33,11 +33,13 @@ func main() {
 		log.Fatalf("Failed to seed database: %v", err)
 	}
 
-	app, scheduler := router.Setup(db, cfg)
+	app, oltScheduler, routerScheduler := router.Setup(db, cfg)
 
-	// Start OLT background sync scheduler
-	scheduler.Start()
+	// Start background sync schedulers
+	oltScheduler.Start()
 	log.Println("OLT sync scheduler started")
+	routerScheduler.Start()
+	log.Println("Router sync scheduler started")
 
 	port := cfg.ServerPort
 	if port == "" {
