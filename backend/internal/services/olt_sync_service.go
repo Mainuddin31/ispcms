@@ -394,11 +394,16 @@ func (s *oltSyncService) doSync(olt *models.OLT, syncLog *models.OLTSyncLog) err
 	archived, _ := s.onuRepo.ArchiveMissing(olt.ID, activeKeys)
 	log.ArchivedONUs = int(archived)
 
-	// ── 5b. Auto-link ONUs to internet accounts by ONU MAC ───────────────────
-	// Fast path: matches onus.mac_address against internet_accounts.caller_id
-	// using a single SQL UPDATE. Works when the ONU hardware MAC == caller_id.
+	// ── 5b. Auto-link ONUs to internet accounts by ONU MAC or name ───────────
+	// Fast path: matches onus.mac_address against internet_accounts.caller_id.
+	// For OLTs that store the PPPoE username as the ONU label (e.g. C-Data/Photon),
+	// also try matching serial_number against internet_accounts.username.
 	linked, _ := s.onuRepo.AutoLinkByMAC(&olt.ID)
 	syncLog.LinkedONUs = int(linked)
+	if oids["link_by_name"] == "true" {
+		namedLinked, _ := s.onuRepo.AutoLinkByName(&olt.ID)
+		syncLog.LinkedONUs += int(namedLinked)
+	}
 
 	// ── 5c. Auto-link via bridge MAC table (FDB or CLI) ──────────────────────
 	// Preferred: CLI scrape (Telnet/SSH) — gives exact ONU-level MACs on OLTs

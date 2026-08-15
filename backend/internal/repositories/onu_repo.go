@@ -45,6 +45,10 @@ type ONURepository interface {
 	// through (identified by portIdx + onuSlot). Only unlinked ONUs are updated.
 	// Returns the number of new links created.
 	LinkFromMACTable(oltID uuid.UUID, entries []MACTableEntry) (int64, error)
+	// AutoLinkByName links unlinked ONUs to internet accounts by matching the
+	// ONU serial_number against internet_accounts.username. Used for OLTs (e.g.
+	// C-Data/Photon) that store the PPPoE username as the ONU label.
+	AutoLinkByName(oltID *uuid.UUID) (int64, error)
 }
 
 type onuRepository struct{ db *gorm.DB }
@@ -281,6 +285,33 @@ func (r *onuRepository) AutoLinkByMAC(oltID *uuid.UUID) (int64, error) {
 		  AND ia.archived_at IS NULL
 		  AND LOWER(REGEXP_REPLACE(onus.mac_address, '[^0-9a-fA-F]', '', 'g'))
 		      = LOWER(REGEXP_REPLACE(ia.caller_id, '[^0-9a-fA-F]', '', 'g'))
+		  ` + oltFilter
+
+	result := r.db.Exec(sql, args...)
+	return result.RowsAffected, result.Error
+}
+
+// AutoLinkByName links unlinked ONUs to internet accounts by matching
+// onus.serial_number against internet_accounts.username (case-insensitive).
+// Used for C-Data/Photon OLTs that store the PPPoE username as the ONU label.
+func (r *onuRepository) AutoLinkByName(oltID *uuid.UUID) (int64, error) {
+	oltFilter := ""
+	var args []interface{}
+	if oltID != nil {
+		oltFilter = "AND onus.olt_id = ?"
+		args = append(args, *oltID)
+	}
+
+	sql := `
+		UPDATE onus
+		SET internet_account_id = ia.id,
+		    updated_at = NOW()
+		FROM internet_accounts ia
+		WHERE onus.archived_at IS NULL
+		  AND onus.internet_account_id IS NULL
+		  AND onus.serial_number <> ''
+		  AND ia.archived_at IS NULL
+		  AND LOWER(onus.serial_number) = LOWER(ia.username)
 		  ` + oltFilter
 
 	result := r.db.Exec(sql, args...)

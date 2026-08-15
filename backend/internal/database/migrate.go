@@ -122,6 +122,14 @@ func PrepareSchema(db *gorm.DB) {
 	db.Exec(`ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "fk_visits_completer"`)
 	db.Exec(`ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "fk_visits_updated_by"`)
 	db.Exec(`ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "fk_visits_rescheduled_by"`)
+
+	// Add oid_map column to snmp_profiles if it does not exist yet.
+	// GORM AutoMigrate does not reliably add columns with custom Valuer/Scanner
+	// types, so we do it manually with an idempotent IF NOT EXISTS guard.
+	if db.Migrator().HasTable("snmp_profiles") {
+		db.Exec(`ALTER TABLE snmp_profiles ADD COLUMN IF NOT EXISTS oid_map TEXT NOT NULL DEFAULT '{}'`)
+		log.Println("PrepareSchema: ensured oid_map column on snmp_profiles")
+	}
 }
 
 func Migrate(db *gorm.DB) error {
