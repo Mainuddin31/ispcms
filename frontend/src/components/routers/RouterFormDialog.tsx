@@ -133,15 +133,16 @@ export function RouterFormDialog({ open, onClose, router }: Props) {
               <Label>POP Name</Label>
               <Input placeholder="POP-01" {...register("pop_name")} />
             </div>
-            <div className="space-y-1.5">
-              <Label>Auto-Sync Interval (minutes)</Label>
-              <Input type="number" min={0} placeholder="60" {...register("sync_interval")} />
-              <p className="text-xs text-muted-foreground">0 = manual only; default 60</p>
-            </div>
             <div className="col-span-2 space-y-1.5">
               <Label>Description</Label>
               <Input placeholder="Optional notes…" {...register("description")} />
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Auto-Sync Interval (minutes)</Label>
+            <Input type="number" min={0} placeholder="60" {...register("sync_interval")} />
+            <p className="text-xs text-muted-foreground">0 = manual only; default 60</p>
           </div>
 
           <DialogFooter>

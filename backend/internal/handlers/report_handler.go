@@ -72,9 +72,11 @@ func (h *ReportHandler) ActiveUserCollection(c *fiber.Ctx) error {
 		}
 	}
 
-	// Apply account-prefix scoping based on the caller's role(s).
+	// Apply role-based scoping.
 	if userID, ok := middleware.GetCurrentUserID(c); ok {
-		if prefixes, isSuperAdmin, _ := h.roleRepo.GetUserAccountPrefixes(userID); !isSuperAdmin {
+		if prefixes, isAdmin, _ := h.roleRepo.GetUserAccountPrefixes(userID); !isAdmin {
+			// Non-admin: restrict to their own collections only
+			filter.CollectorID = &userID
 			filter.PrefixRestricted = true
 			filter.Prefixes = prefixes
 		}
