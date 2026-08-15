@@ -54,7 +54,7 @@ type SNMPProfile struct {
 	Name        string    `gorm:"type:varchar(100);not null;uniqueIndex" json:"name"`
 	Vendor      string    `gorm:"type:varchar(100);not null" json:"vendor"`
 	Technology  string    `gorm:"type:varchar(20);not null" json:"technology"` // EPON | GPON
-	OIDMap      OIDMap    `gorm:"type:text;not null" json:"oid_map"`
+	OIDMap      OIDMap    `gorm:"type:text;not null;default:'{}'" json:"oid_map"`
 	Description string    `gorm:"type:text" json:"description"`
 	IsDefault   bool      `gorm:"default:false" json:"is_default"`
 	CreatedAt   time.Time `json:"created_at"`

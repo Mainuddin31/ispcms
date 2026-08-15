@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,61 @@ import (
 	"github.com/ispcms/backend/pkg/telnet"
 	"github.com/ispcms/backend/pkg/utils"
 )
+
+// cdataPortRange maps a PON port to a global ONU ID range (1-based, inclusive).
+// C-Data OLTs assign sequential global IDs to all ONUs across all ports in
+// port-number order. The port table ONU count column is used to derive the ranges.
+type cdataPortRange struct {
+	portIdx  int
+	startGID int // global ONU ID, inclusive
+	endGID   int // inclusive
+}
+
+// buildCDataPortRanges walks the C-Data port ONU count OID and returns the
+// sorted list of port ranges. Ports with zero ONUs are excluded.
+func buildCDataPortRanges(client *snmp.Client, oids models.OIDMap) []cdataPortRange {
+	countOID, ok := oids["cdata_port_onu_count_oid"]
+	if !ok || countOID == "" {
+		return nil
+	}
+	walk, err := client.Walk(countOID)
+	if err != nil || len(walk) == 0 {
+		log.Printf("[CData] port ONU count walk failed or empty: %v", err)
+		return nil
+	}
+
+	type portCount struct {
+		portIdx int
+		count   int
+	}
+	var ports []portCount
+	for suffix, val := range walk {
+		parts := snmp.ParseIndex(suffix)
+		if len(parts) < 1 {
+			continue
+		}
+		portIdx := parts[len(parts)-1] // last element is the PON port number
+		count, ok2 := val.(int64)
+		if !ok2 || count <= 0 {
+			continue // skip empty ports
+		}
+		ports = append(ports, portCount{portIdx: portIdx, count: int(count)})
+	}
+	sort.Slice(ports, func(i, j int) bool { return ports[i].portIdx < ports[j].portIdx })
+
+	ranges := make([]cdataPortRange, 0, len(ports))
+	gid := 1
+	for _, pc := range ports {
+		ranges = append(ranges, cdataPortRange{
+			portIdx:  pc.portIdx,
+			startGID: gid,
+			endGID:   gid + pc.count - 1,
+		})
+		gid += pc.count
+	}
+	log.Printf("[CData] port ranges: %+v", ranges)
+	return ranges
+}
 
 // OLTSyncService synchronises a single OLT via SNMP.
 type OLTSyncService interface {
@@ -157,8 +213,43 @@ func (s *oltSyncService) doSync(olt *models.OLT, syncLog *models.OLTSyncLog) err
 	onuPos := profileInt(oids, "index_onu_pos", 1)
 	powerDiv := profileFloat(oids, "power_divisor", 10.0)
 	indexPacked := oids["index_packed"] == "true"     // single int: port<<16|slot<<8|onu
+	indexCData := oids["index_cdata"] == "true"       // C-Data sequential global ONU IDs
 	statusOnlineStr := oids["status_online_string"]   // string match for online status
 	rxNegate := oids["rx_power_negate"] == "true"
+
+	// C-Data: build port ranges from ONU count table and pre-compute suffix→(port,slot)
+	suffixToPortSlot := map[string][2]int{}
+	if indexCData {
+		cdataRanges := buildCDataPortRanges(client, oids)
+		if len(cdataRanges) > 0 {
+			// Populate active port indexes from known ranges
+			for _, r := range cdataRanges {
+				activePortIndexes = append(activePortIndexes, r.portIdx)
+			}
+			// Sort MAC walk suffixes by integer value to get consistent global ordering
+			sortedSuffixes := make([]string, 0, len(macWalk))
+			for k := range macWalk {
+				sortedSuffixes = append(sortedSuffixes, k)
+			}
+			sort.Slice(sortedSuffixes, func(i, j int) bool {
+				pi := snmp.ParseIndex(sortedSuffixes[i])
+				pj := snmp.ParseIndex(sortedSuffixes[j])
+				if len(pi) > 0 && len(pj) > 0 {
+					return pi[0] < pj[0]
+				}
+				return sortedSuffixes[i] < sortedSuffixes[j]
+			})
+			for idx, suffix := range sortedSuffixes {
+				globalID := idx + 1
+				for _, r := range cdataRanges {
+					if globalID >= r.startGID && globalID <= r.endGID {
+						suffixToPortSlot[suffix] = [2]int{r.portIdx, globalID - r.startGID + 1}
+						break
+					}
+				}
+			}
+		}
+	}
 
 	// ── 3. Walk optional OIDs ─────────────────────────────────────────────────
 	// onu_ifname: VSOL V2-style OID where each entry is "EPON0/P:S".
@@ -201,6 +292,13 @@ func (s *oltSyncService) doSync(olt *models.OLT, syncLog *models.OLTSyncLog) err
 			packed := parts[0]
 			portIdx = (packed >> 16) & 0xFF
 			onuSlot = (packed >> 8) & 0xFF
+		} else if indexCData {
+			// C-Data: sequential global IDs; port/slot pre-computed in sorted order
+			ps, ok := suffixToPortSlot[suffix]
+			if !ok {
+				continue // outside known port ranges (shouldn't happen)
+			}
+			portIdx, onuSlot = ps[0], ps[1]
 		} else {
 			parts := snmp.ParseIndex(suffix)
 			if len(parts) <= onuPos || len(parts) <= portPos {
