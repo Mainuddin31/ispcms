@@ -248,6 +248,8 @@ func (s *oltSyncService) doSync(olt *models.OLT, syncLog *models.OLTSyncLog) err
 					}
 				}
 			}
+		} else {
+			fmt.Printf("[CData] port count table empty or unavailable — falling back to direct suffix parsing for %d MAC entries\n", len(macWalk))
 		}
 	}
 
@@ -263,6 +265,8 @@ func (s *oltSyncService) doSync(olt *models.OLT, syncLog *models.OLTSyncLog) err
 	modelWalk := walkOpt(client, oids, "onu_model")
 
 	// ── 4. Process each ONU ──────────────────────────────────────────────────
+	fmt.Printf("[SNMP] OLT %s: MAC walk returned %d entries (indexCData=%v, suffixMapLen=%d)\n",
+		olt.Name, len(macWalk), indexCData, len(suffixToPortSlot))
 	log.ONUsDiscovered = len(macWalk)
 
 	activeKeys := make([][2]int, 0, len(macWalk))
@@ -293,12 +297,26 @@ func (s *oltSyncService) doSync(olt *models.OLT, syncLog *models.OLTSyncLog) err
 			portIdx = (packed >> 16) & 0xFF
 			onuSlot = (packed >> 8) & 0xFF
 		} else if indexCData {
-			// C-Data: sequential global IDs; port/slot pre-computed in sorted order
+			// C-Data: sequential global IDs; port/slot pre-computed in sorted order.
+			// If the count-table walk failed (suffixToPortSlot empty), fall back to
+			// direct suffix parsing: C-Data firmware may index as portIdx.onuSlot.
 			ps, ok := suffixToPortSlot[suffix]
-			if !ok {
-				continue // outside known port ranges (shouldn't happen)
+			if ok {
+				portIdx, onuSlot = ps[0], ps[1]
+			} else {
+				parts := snmp.ParseIndex(suffix)
+				if len(parts) >= 2 {
+					// Direct portIdx.onuSlot format
+					portIdx = parts[portPos]
+					onuSlot = parts[onuPos]
+				} else if len(parts) == 1 && parts[0] > 0 {
+					// Single global ID without count table — group all on port 1
+					portIdx = 1
+					onuSlot = parts[0]
+				} else {
+					continue
+				}
 			}
-			portIdx, onuSlot = ps[0], ps[1]
 		} else {
 			parts := snmp.ParseIndex(suffix)
 			if len(parts) <= onuPos || len(parts) <= portPos {

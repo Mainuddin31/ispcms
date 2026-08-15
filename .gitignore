@@ -8,6 +8,7 @@ backend/vendor/
 backend/*.exe
 backend/*.out
 backend/tmp/
+backend/ispcms-backend
 
 # Node / Next.js
 frontend/node_modules/

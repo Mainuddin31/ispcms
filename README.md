@@ -191,6 +191,7 @@ Before adding an OLT, create (or use the seeded) SNMP profile for its vendor:
 | BDCOM_EPON | BDCOM | EPON |
 | VSOL_EPON | VSOL | EPON |
 | CDATA_EPON | C-Data | EPON |
+| Photon_EPON | Shenzhen Photon / C-Data (enterprise OID 12170) | EPON |
 | HUAWEI_GPON | Huawei | GPON |
 | ZTE_GPON | ZTE | GPON |
 | RICHERLINK_EPON | Richerlink | EPON |
@@ -203,11 +204,47 @@ Before adding an OLT, create (or use the seeded) SNMP profile for its vendor:
 | `index_port_pos` | Position in OID suffix for port number (default `"0"`) |
 | `index_onu_pos` | Position in OID suffix for ONU slot (default `"1"`) |
 | `index_packed` | `"true"` — packed index encoding (Richerlink) |
+| `index_cdata` | `"true"` — C-Data/Photon index encoding: suffix `A.B.C` maps to port=A, onu=B |
 | `status_online_string` | Substring match for string-based online status |
 | `power_divisor` | Divide raw power int by this to get dBm (default `"10"`) |
 | `rx_power_negate` | `"true"` — negate RX power (VSOL absolute value) |
 | `distance_unit` | `"m"` or `"cm"` — auto-converts cm to metres |
 | `use_getnext` | `"true"` — force GETNEXT walk (no GETBULK support) |
+| `link_by_name` | `"true"` — after MAC linking, also match ONU `serial_number` to account `username` (case-insensitive). Used for C-Data/Photon OLTs where the ONU label OID stores the PPPoE username |
+| `cdata_port_onu_count_oid` | OID prefix for per-port ONU count table (C-Data/Photon only) — used to enumerate valid port/slot combos before walking ONU subtables |
+| `onu_tx_power` | OID for TX optical power column (some vendors expose this in a separate subtable) |
+
+### Photon_EPON Profile (C-Data / Shenzhen Photon, enterprise OID 12170)
+
+This profile is **not seeded automatically**. Create it via API after deployment:
+
+```bash
+TOKEN="<your JWT token>"
+curl -s -X POST http://<server>:8082/api/v1/snmp-profiles \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Photon_EPON",
+    "vendor": "Photon",
+    "technology": "EPON",
+    "description": "Shenzhen Photon Broadband / C-Data OLT (enterprise OID 1.3.6.1.4.1.12170)",
+    "oid_map": {
+      "onu_serial":              "1.3.6.1.4.1.12170.2.3.4.1.1.2",
+      "onu_mac":                 "1.3.6.1.4.1.12170.2.3.4.1.1.7",
+      "onu_status":              "1.3.6.1.4.1.12170.2.3.4.1.1.8",
+      "onu_distance":            "1.3.6.1.4.1.12170.2.3.4.1.1.15",
+      "onu_rx_power":            "1.3.6.1.4.1.12170.2.3.4.2.1.4",
+      "onu_tx_power":            "1.3.6.1.4.1.12170.2.3.4.2.1.5",
+      "cdata_port_onu_count_oid":"1.3.6.1.4.1.12170.2.3.3.1.1.8",
+      "power_divisor":           "100",
+      "index_cdata":             "true",
+      "distance_unit":           "m",
+      "link_by_name":            "true"
+    }
+  }' | jq .
+```
+
+**How `link_by_name` works for C-Data/Photon:** The `onu_serial` OID (`…4.1.1.2`) stores the ONU's label as set on the OLT — operators typically name ONUs with the customer's PPPoE username. After the MAC-based auto-link pass, the system runs a second pass matching `LOWER(onus.serial_number) = LOWER(internet_accounts.username)`. ONUs that still don't have a match (e.g. never named on the OLT, or prefix mismatch) remain unlinked and can be linked manually via ONU Inventory.
 
 ### OLT Sync
 
@@ -358,10 +395,22 @@ sudo nginx -t && sudo systemctl restart nginx && sudo systemctl enable nginx
 
 ```bash
 cd ~/ispcms
-git stash          # discard local server changes if any
-git pull
-docker compose build --no-cache
-docker compose up -d
+
+# Fetch and reset to origin/main (safer than git pull if local state is dirty)
+git fetch origin
+git reset --hard origin/main
+
+# Rebuild only the backend (faster than rebuilding everything)
+sudo docker compose build --no-cache backend
+sudo docker compose up -d
+```
+
+> **Note:** If the project is managed via a systemd service (`sudo systemctl restart ispcms`), that service typically runs `docker compose up -d`. You still need to run `docker compose build --no-cache backend` first so the new image is ready before restarting.
+
+After update, check logs to confirm the migration completed without errors:
+
+```bash
+docker compose logs backend | grep -E "PrepareSchema|AutoMigrate|Seed|ERROR" | head -30
 ```
 
 ### Useful Commands
@@ -397,7 +446,13 @@ docker compose build --no-cache backend && docker compose up -d backend
 docker compose build --no-cache frontend && docker compose up -d frontend
 ```
 
-Schema is auto-migrated via GORM `AutoMigrate` on every startup — no manual SQL needed.
+Schema is auto-migrated on every startup — no manual SQL needed. The startup sequence is:
+
+1. `PrepareSchema` — idempotent raw SQL fixups (e.g. `ALTER TABLE … ADD COLUMN IF NOT EXISTS`) for columns that GORM AutoMigrate cannot reliably add (custom Valuer/Scanner types like `oid_map`)
+2. `AutoMigrate` — GORM schema sync for all models
+3. `Seed` — inserts/updates built-in SNMP profiles and default roles
+
+If you see `column "oid_map" of relation "snmp_profiles" does not exist` errors, the container is running old code — rebuild with `--no-cache`.
 
 ---
 
