@@ -39,6 +39,17 @@ A full-stack management platform for ISPs running MikroTik routers and PON/OLT e
 | **ONU Inventory** | Full ONU list with filters (OLT, port, status, unlinked-only), optical power, distance, and link-to-account action |
 | **SNMP Profiles** | Vendor-specific OID maps — define once, reuse across OLTs |
 
+### Visiting
+| Page | Purpose |
+|------|---------|
+| **Pending Customers** (`/visiting`) | Customers with unpaid/partial/due bills who need a collection visit. Lists due amount, bill month, current visit status. Click **Schedule** to assign a staff member and pick a date/time |
+| **Visit Schedule** (`/visiting/schedule`) | All scheduled visits — filterable by date preset (Today / Tomorrow / This Week / All), status, staff, and search. Actions: Complete, Reschedule, Cancel |
+
+**Billing officer restrictions:**
+- When scheduling or rescheduling a visit, billing officers see only themselves in the staff field (cannot assign to another user)
+- The Visit Schedule page automatically filters to show only the logged-in billing officer's own visits (staff filter dropdown is hidden)
+- Admins and super_admins see all staff and all visits
+
 ### Reports
 | Page | Purpose |
 |------|---------|

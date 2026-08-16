@@ -4,11 +4,12 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarClock, Search, UserCheck, Clock, AlertCircle,
-  CheckCircle2, CalendarDays, ChevronRight,
+  CheckCircle2, CalendarDays, ChevronRight, User2,
 } from "lucide-react";
 import Link from "next/link";
 import { visitingApi, usersApi } from "@/lib/api";
 import { PendingVisitCustomer, User } from "@/types";
+import { useAuth } from "@/contexts/AuthContext";
 import { Topbar } from "@/components/layout/Topbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,16 +55,20 @@ interface ScheduleDialogProps {
 
 function ScheduleDialog({ customer, onClose, onSaved }: ScheduleDialogProps) {
   const { toast } = useToast();
+  const { user: currentUser, hasRole } = useAuth();
+  const isBillingOfficer = hasRole("billing_officer") && !hasRole("admin") && !hasRole("super_admin");
+
   const [date, setDate] = useState(customer?.scheduled_date?.split("T")[0] ?? "");
   const [time, setTime] = useState(customer?.scheduled_time ?? "17:00");
-  const [staffId, setStaffId] = useState("");
+  // Billing officers are always assigned to themselves
+  const [staffId, setStaffId] = useState(isBillingOfficer ? (currentUser?.id ?? "") : "");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
   const { data: usersData } = useQuery({
     queryKey: ["users-for-visiting"],
     queryFn: () => usersApi.list({ status: "active", page_size: 200 }),
-    enabled: !!customer,
+    enabled: !!customer && !isBillingOfficer,
   });
   const staffList: User[] = usersData?.data?.data ?? [];
 
@@ -158,18 +163,26 @@ function ScheduleDialog({ customer, onClose, onSaved }: ScheduleDialogProps) {
           {/* Staff */}
           <div className="space-y-1.5">
             <Label>Assigned Staff <span className="text-red-500">*</span></Label>
-            <Select value={staffId} onValueChange={setStaffId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select staff member…" />
-              </SelectTrigger>
-              <SelectContent>
-                {staffList.map(u => (
-                  <SelectItem key={u.id} value={u.id}>
-                    {u.full_name} ({u.username})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {isBillingOfficer ? (
+              <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+                <User2 className="w-4 h-4 text-muted-foreground shrink-0" />
+                <span className="font-medium">{currentUser?.full_name}</span>
+                <span className="text-muted-foreground">({currentUser?.username})</span>
+              </div>
+            ) : (
+              <Select value={staffId} onValueChange={setStaffId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select staff member…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {staffList.map(u => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {u.full_name} ({u.username})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {/* Notes */}
