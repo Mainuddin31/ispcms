@@ -56,19 +56,19 @@ interface ScheduleDialogProps {
 function ScheduleDialog({ customer, onClose, onSaved }: ScheduleDialogProps) {
   const { toast } = useToast();
   const { user: currentUser, hasRole } = useAuth();
-  const isBillingOfficer = hasRole("billing_officer") && !hasRole("admin") && !hasRole("super_admin");
+  const isRestricted = !hasRole("admin") && !hasRole("super_admin");
 
   const [date, setDate] = useState(customer?.scheduled_date?.split("T")[0] ?? "");
   const [time, setTime] = useState(customer?.scheduled_time ?? "17:00");
-  // Billing officers are always assigned to themselves
-  const [staffId, setStaffId] = useState(isBillingOfficer ? (currentUser?.id ?? "") : "");
+  // Non-admin users are always assigned to themselves
+  const [staffId, setStaffId] = useState(isRestricted ? (currentUser?.id ?? "") : "");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
   const { data: usersData } = useQuery({
     queryKey: ["users-for-visiting"],
     queryFn: () => usersApi.list({ status: "active", page_size: 200 }),
-    enabled: !!customer && !isBillingOfficer,
+    enabled: !!customer && !isRestricted,
   });
   const staffList: User[] = usersData?.data?.data ?? [];
 
@@ -163,7 +163,7 @@ function ScheduleDialog({ customer, onClose, onSaved }: ScheduleDialogProps) {
           {/* Staff */}
           <div className="space-y-1.5">
             <Label>Assigned Staff <span className="text-red-500">*</span></Label>
-            {isBillingOfficer ? (
+            {isRestricted ? (
               <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
                 <User2 className="w-4 h-4 text-muted-foreground shrink-0" />
                 <span className="font-medium">{currentUser?.full_name}</span>

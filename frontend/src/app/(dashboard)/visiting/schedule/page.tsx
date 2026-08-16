@@ -102,18 +102,18 @@ function CompleteDialog({ visit, onClose, onDone }: { visit: Visit; onClose: () 
 function RescheduleDialog({ visit, onClose, onDone }: { visit: Visit; onClose: () => void; onDone: () => void }) {
   const { toast } = useToast();
   const { user: currentUser, hasRole } = useAuth();
-  const isBillingOfficer = hasRole("billing_officer") && !hasRole("admin") && !hasRole("super_admin");
+  const isRestricted = !hasRole("admin") && !hasRole("super_admin");
 
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
-  const [staffId, setStaffId] = useState(isBillingOfficer ? (currentUser?.id ?? "") : "");
+  const [staffId, setStaffId] = useState(isRestricted ? (currentUser?.id ?? "") : "");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
 
   const { data: usersData } = useQuery({
     queryKey: ["users-for-visiting"],
     queryFn: () => usersApi.list({ status: "active", page_size: 200 }),
-    enabled: !isBillingOfficer,
+    enabled: !isRestricted,
   });
   const staffList: User[] = usersData?.data?.data ?? [];
 
@@ -156,7 +156,7 @@ function RescheduleDialog({ visit, onClose, onDone }: { visit: Visit; onClose: (
           </div>
           <div className="space-y-1.5">
             <Label>Staff <span className="text-muted-foreground text-xs">(leave blank to keep current)</span></Label>
-            {isBillingOfficer ? (
+            {isRestricted ? (
               <div className="flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
                 <User2 className="w-4 h-4 text-muted-foreground shrink-0" />
                 <span className="font-medium">{currentUser?.full_name}</span>
@@ -238,12 +238,11 @@ const DATE_PRESETS = [
 export default function VisitSchedulePage() {
   const qc = useQueryClient();
   const { user: currentUser, hasRole } = useAuth();
-  const isBillingOfficer = hasRole("billing_officer") && !hasRole("admin") && !hasRole("super_admin");
+  const isRestricted = !hasRole("admin") && !hasRole("super_admin");
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [datePreset, setDatePreset] = useState<string>("today");
-  // Billing officers always see only their own visits
   const [staffFilter, setStaffFilter] = useState("all");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 25;
@@ -257,8 +256,7 @@ export default function VisitSchedulePage() {
     page_size: PAGE_SIZE,
     status: status !== "all" ? status : undefined,
     date_preset: datePreset !== "all" ? (datePreset as "today" | "tomorrow" | "this_week") : undefined,
-    // Billing officers always see only their own visits
-    assigned_staff_id: isBillingOfficer
+    assigned_staff_id: isRestricted
       ? (currentUser?.id ?? undefined)
       : staffFilter !== "all" ? staffFilter : undefined,
     search: search || undefined,
@@ -272,7 +270,7 @@ export default function VisitSchedulePage() {
   const { data: usersData } = useQuery({
     queryKey: ["users-for-visiting"],
     queryFn: () => usersApi.list({ status: "active", page_size: 200 }),
-    enabled: !isBillingOfficer,
+    enabled: !isRestricted,
   });
 
   const visits: Visit[] = data?.data?.data ?? [];
@@ -335,8 +333,8 @@ export default function VisitSchedulePage() {
             </SelectContent>
           </Select>
 
-          {/* Staff filter — hidden for billing officers (they only see their own visits) */}
-          {!isBillingOfficer && (
+          {/* Staff filter — hidden for non-admin users (they only see their own visits) */}
+          {!isRestricted && (
             <Select value={staffFilter} onValueChange={v => { setStaffFilter(v); setPage(1); }}>
               <SelectTrigger className="w-44">
                 <SelectValue placeholder="All Staff" />
